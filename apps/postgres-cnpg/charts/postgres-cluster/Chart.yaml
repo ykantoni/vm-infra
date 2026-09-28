@@ -1,5 +1,0 @@
-apiVersion: v2
-name: postgres-cluster
-description: A single CloudNativePG Cluster (one primary, streaming-replication standbys)
-type: application
-version: 0.1.0

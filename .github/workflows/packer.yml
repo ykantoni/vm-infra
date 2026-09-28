@@ -1,0 +1,70 @@
+name: Packer
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - packer/**
+  workflow_dispatch:
+    inputs:
+      rebuild:
+        description: Destroy the existing templates (9100, 9101) first
+        type: boolean
+        default: true
+
+concurrency:
+  group: packer-templates
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    # Rebuilding the golden images is gated on the same approval as
+    # terraform apply.
+    environment: proxmox
+
+    runs-on:
+      - self-hosted
+      - linux
+      - terraform
+      - proxmox
+
+    env:
+      PROXMOX_VE_ENDPOINT: ${{ secrets.PROXMOX_VE_ENDPOINT }}
+      PROXMOX_VE_API_TOKEN: ${{ secrets.PROXMOX_VE_API_TOKEN }}
+      # A path on the runner host, not the key itself; see runner/README.md.
+      PKR_VAR_packer_ssh_private_key_file: ${{ vars.PACKER_SSH_PRIVATE_KEY_FILE || '/var/lib/terraform/packer_ssh_key' }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check tools
+        run: |
+          packer version
+          just --version
+
+      # packer/variables.pkr.hcl reads PROXMOX_URL/USERNAME/TOKEN; derive them
+      # from the same secrets Terraform uses. PROXMOX_VE_API_TOKEN has the form
+      # user@realm!tokenid=secret.
+      - name: Derive Packer credentials
+        run: |
+          token_secret="${PROXMOX_VE_API_TOKEN#*=}"
+          echo "::add-mask::$token_secret"
+          {
+            echo "PROXMOX_URL=${PROXMOX_VE_ENDPOINT%/}/api2/json"
+            echo "PROXMOX_USERNAME=${PROXMOX_VE_API_TOKEN%%=*}"
+            echo "PROXMOX_TOKEN=$token_secret"
+          } >> "$GITHUB_ENV"
+
+      # Packer can't clone onto a VM ID that's already taken. Runs on a push
+      # too, since a push to packer/** means "rebuild the templates".
+      - name: Destroy existing templates
+        if: github.event_name == 'push' || inputs.rebuild
+        run: just t-destroy
+
+      - name: Build templates
+        run: just t-create

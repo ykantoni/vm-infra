@@ -39,10 +39,13 @@ module "rke2_cluster" {
   wait_for_api        = var.wait_for_api
   api_wait_timeout    = var.api_wait_timeout
   api_wait_interval   = var.api_wait_interval
+  kubeconfig_raw_path = pathexpand("~/.kube/rke2-raw.yaml")
 
   nodes = module.proxmox_vm.nodes
 }
 
+# A copy for humans and kubectl (e.g. Justfile's destroy recipe). Terraform's
+# own providers read module.rke2_cluster.kubeconfig directly.
 resource "local_sensitive_file" "kubeconfig" {
   filename = pathexpand("~/.kube/config")
   content  = module.rke2_cluster.kubeconfig

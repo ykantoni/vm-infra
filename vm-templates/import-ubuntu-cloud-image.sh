@@ -12,17 +12,17 @@
 set -euo pipefail
 
 VMID="${1:-9099}"
-UBUNTU_RELEASE="resolute"     # 26.04 LTS, "Resolute Raccoon"
+UBUNTU_RELEASE="noble"        # 24.04 LTS, "Noble Numbat"
 STORAGE="sdc-storage"          # must match root main.tf's var.datastore_id
-IMAGE_URL="https://cloud-images.ubuntu.com/releases/${UBUNTU_RELEASE}/release/ubuntu-26.04-server-cloudimg-amd64.img"
-IMAGE_FILE="/tmp/ubuntu-26.04-server-cloudimg-amd64.img"
+IMAGE_URL="https://cloud-images.ubuntu.com/releases/${UBUNTU_RELEASE}/release/ubuntu-24.04-server-cloudimg-amd64.img"
+IMAGE_FILE="/tmp/ubuntu-24.04-server-cloudimg-amd64.img"
 
 if [ ! -f "${IMAGE_FILE}" ]; then
   wget -O "${IMAGE_FILE}" "${IMAGE_URL}"
 fi
 
 qm create "${VMID}" \
-  --name "ubuntu-26.04-cloudimg-seed" \
+  --name "ubuntu-24.04-cloudimg-seed" \
   --memory 2048 \
   --cores 2 \
   --cpu host \

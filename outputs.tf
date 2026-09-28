@@ -29,16 +29,12 @@ output "kubeconfig_path" {
   value = local_sensitive_file.kubeconfig.filename
 }
 
-output "load_balancer_ip_range" {
-  value = one(module.cilium[*].load_balancer_ip_range)
+output "argocd_namespace" {
+  description = "Namespace Argo CD runs in. Initial admin password: just argocd-password"
+  value       = module.argocd.namespace
 }
 
-output "grafana_service_type" {
-  description = "Kubernetes Service type Grafana is exposed as, when enable_prometheus = true. When LoadBalancer, find the assigned address with: kubectl -n monitoring get svc kube-prometheus-stack-grafana"
-  value       = one(module.prometheus[*].grafana_service_type)
-}
-
-output "prometheus_service_type" {
-  description = "Kubernetes Service type Prometheus's web UI is exposed as, when enable_prometheus = true. When LoadBalancer, find the assigned address with: kubectl -n monitoring get svc kube-prometheus-stack-prometheus"
-  value       = one(module.prometheus[*].prometheus_service_type)
+output "sealed_secrets_key_restored" {
+  description = "false on a first build: back the controller's generated key up with `just seal-key-backup` once k8s-infra has installed it"
+  value       = module.argocd.sealed_secrets_key_restored
 }

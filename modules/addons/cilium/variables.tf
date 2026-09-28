@@ -15,42 +15,6 @@ variable "k8s_service_port" {
   default     = 6443
 }
 
-variable "lb_ipam_pool_name" {
-  description = "Name of the CiliumLoadBalancerIPPool and its matching L2 announcement policy"
-  type        = string
-  default     = "default"
-}
-
-variable "lb_ipam_range" {
-  description = "Inclusive address range Cilium LB IPAM assigns to LoadBalancer services"
-
-  type = object({
-    start = string
-    stop  = string
-  })
-
-  validation {
-    condition = alltrue([
-      can(cidrhost("${var.lb_ipam_range.start}/32", 0)),
-      can(cidrhost("${var.lb_ipam_range.stop}/32", 0)),
-    ])
-
-    error_message = "lb_ipam_range start and stop must both be IPv4 addresses."
-  }
-}
-
-variable "l2_announcement_interfaces" {
-  description = "Regular expressions matching the node interfaces that answer ARP for LoadBalancer IPs"
-  type        = list(string)
-  default     = ["^eth[0-9]+"]
-}
-
-variable "l2_announce_on_control_plane" {
-  description = "Let control-plane nodes answer ARP as well. Off by default so traffic only lands on nodes that run workloads."
-  type        = bool
-  default     = false
-}
-
 variable "k8s_client_rate_limit" {
   description = "API server client rate limit for the Cilium agent, raised to absorb L2 announcement leader election"
 
@@ -72,9 +36,9 @@ variable "enable_hubble_ui" {
 }
 
 variable "hubble_ui_service_type" {
-  description = "Kubernetes Service type Hubble UI's web UI (port 80) is exposed as. LoadBalancer (the default) gets an address from Cilium's load_balancer_ip_range, since this cluster runs no ingress controller; see the root README's \"Networking\" section."
+  description = "Kubernetes Service type Hubble UI's web UI (port 80) is exposed as. ClusterIP (the default) because the LB-IPAM pool comes later, from k8s-infra via Argo CD: a LoadBalancer Service here would never get an address in time and helm_release's wait would hang. k8s-infra's lb-services chart adds a separate LoadBalancer Service for it."
   type        = string
-  default     = "LoadBalancer"
+  default     = "ClusterIP"
 }
 
 variable "cilium_extra_values" {

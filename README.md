@@ -1,6 +1,20 @@
-# terraform-proxclus
+# vm-infra
 
-Hardened Ubuntu 26.04 + RKE2 Kubernetes cluster on Proxmox VE.
+Hardened Ubuntu 24.04 + RKE2 Kubernetes cluster on Proxmox VE, up to the
+point where Argo CD takes over.
+
+Part of [proxclus](https://github.com/ykantoni/proxclus), which pins three
+repositories:
+
+| Repository    | Owns                                                                 | Applied by                                      |
+| ------------- | -------------------------------------------------------------------- | ----------------------------------------------- |
+| **vm-infra**  | golden images, Proxmox VMs, RKE2, Cilium (CNI), Argo CD              | Terraform/Packer via GitHub Actions on a self-hosted runner |
+| k8s-infra     | LB-IPAM pool, Sealed Secrets, Longhorn, metrics-server, CNPG operator, kube-prometheus-stack, NVIDIA GPU operator | Argo CD (`root-k8s-infra`) |
+| k8s-apps      | Ollama + Open WebUI, Postgres (CNPG `Cluster`)                       | Argo CD (`root-k8s-apps`)                       |
+
+This repository stops at the smallest set of things Argo CD needs before it
+can run: VMs, Kubernetes, pod networking (Cilium), and Argo CD itself, plus
+the two root Applications that point Argo CD at k8s-infra and k8s-apps.
 
 ## Layout
 
@@ -9,59 +23,80 @@ ordering constraint: a VM's cloud-init content has to exist *before* the VM
 is created, while checking that the cluster actually came up can only happen
 *after*. One module can't sit on both sides of that dependency.
 
-- `modules/proxmox-vm` — Proxmox VM creation, cloned from the templates
-  `packer/` builds; wires in each node's cloud-init snippet by ID
 - `modules/rke2-config` — renders and uploads each node's cloud-init
   user-data (hostname, RKE2 role config, the kube-vip manifest on the
   control-plane node) as a Proxmox snippet; generates the shared RKE2 join
   token and the SSH keypair Terraform itself uses afterward. Runs *before*
   `modules/proxmox-vm`, not after.
+- `modules/proxmox-vm` — Proxmox VM creation, cloned from the templates
+  `packer/` builds; wires in each node's cloud-init snippet by ID
 - `modules/rke2-cluster` — waits for `rke2-server` to come up on the
   bootstrap node (over SSH) and fetches its kubeconfig. Runs *after*
   `modules/proxmox-vm`, keyed off its VM outputs rather than the raw node
   list, so Terraform knows to wait for the VMs to exist first.
-- `modules/addons/cilium` — Cilium and its LoadBalancer address pool
-- `modules/addons/longhorn` — Longhorn, the default CSI provider for dynamic PVs
-- `modules/addons/metrics-server` — metrics-server, for `kubectl top` and the
-  HorizontalPodAutoscaler
-- `modules/addons/nvidia-device-plugin` — NVIDIA device plugin, so a mapped GPU
-  shows up as an `nvidia.com/gpu` resource
-- `addons.tf` — where addons are composed
+- `modules/addons/cilium` — Cilium as CNI and kube-proxy replacement
+- `modules/argocd` — Argo CD, its AppProjects, the two root Applications,
+  and the Sealed Secrets key restore; see `modules/argocd/README.md`
+- `addons.tf` — where Cilium and Argo CD are composed
 - `packer/` — builds the two Proxmox VM templates (plain and GPU) that
   `modules/proxmox-vm` clones from; see `packer/README.md`
 - `vm-templates/import-ubuntu-cloud-image.sh` — one-time import of the stock
   Ubuntu cloud image that `packer/` then clones and provisions
-- `apps/` — applications deployed onto this cluster, each its own
-  independent Terraform root (own state, own providers, own lifecycle); see
-  `apps/README.md` for the convention and `apps/postgres-cnpg` for the
-  reference example
-- `troubleshooting-agents/` — LangGraph troubleshooting agents (Ollama,
-  NVIDIA GPU, Proxmox host) with a small React GUI, independent of
-  Terraform entirely; see `troubleshooting-agents/README.md`. Its Talos-
-  specific agent/skills (`talosctl`-based) predate this cluster's move off
-  Talos and need a follow-up SSH-based rework, tracked separately from this
-  Terraform layout.
+- `proxmox-host/` — host-side files (VFIO, GPU BAR resize) installed by hand
+- `runner/` — how the self-hosted GitHub Actions runner is set up
+- `.github/workflows/` — `terraform.yml` (plan on PR, approved apply on
+  `main`) and `packer.yml` (approved template rebuilds)
 
-## Adding an addon
+## How changes are applied
 
-One module per addon under `modules/addons/`, instantiated in `addons.tf` with
-its own enable flag. An addon owns everything it needs: its Helm release, its
-namespace, and any nested charts for custom resources.
+| Change                               | Flow                                                                           |
+| ------------------------------------ | ------------------------------------------------------------------------------ |
+| Terraform (`*.tf`, `terraform.tfvars`) | PR → `plan` on the self-hosted runner → merge to `main` → approve the `proxmox` environment → `apply` |
+| Golden image (`packer/**`)           | merge to `main` → approve → `just t-destroy` + `just t-create`; then replace the VMs (taint or recreate the nodes) so they boot from the new template |
+| Addon (k8s-infra)                    | PR + merge in k8s-infra; Argo CD syncs it. No runner, no Terraform.            |
+| Application (k8s-apps)               | PR + merge in k8s-apps; Argo CD syncs it.                                      |
 
-Unlike under Talos, an addon needing something from the node itself (a
-package, a host directory, a systemd unit) gets it from `packer/`'s
-provisioning scripts or, if it's genuinely per-node, from
-`modules/rke2-config`'s cloud-init template — not from a machine-config
-patch mechanism, which no longer exists in this repo. `modules/addons/longhorn`
-is the example: it used to need a Talos `extraMounts` patch to expose
-`/var/lib/longhorn` to the kubelet at all; a normal Ubuntu kubelet already
-sees that path, so nothing addon-specific is needed there anymore, only
-`packer/scripts/install-longhorn-deps.sh`'s `open-iscsi`/`util-linux`
-install, which isn't Longhorn-specific either (any node might run it).
+Pull requests from forks never run on the self-hosted runner. See
+`runner/README.md` for the runner, its secrets and the `proxmox` environment.
 
-Resist collapsing this into one generic map of charts. Namespace labels, custom
-resources ordered after their CRDs, and ordering between addons all need
-per-addon code.
+## Usage
+
+Task running is [`just`](https://github.com/casey/just), not Make; see
+`Justfile` for the full recipe list (`just --list`).
+
+```bash
+just t-create          # once, builds the Proxmox templates (see packer/README.md)
+just apply             # VMs → RKE2 → Cilium → Argo CD → root Applications
+just generate          # writes ~/.kube/config and ~/.ssh/rke2_admin
+just argocd-password   # initial Argo CD admin password
+just seal-key-backup   # once, after the first build (see below)
+```
+
+Run these on the runner host: Terraform state is local to it (`backend.tf`).
+
+The `helm` and `kubernetes` providers are configured from the kubeconfig
+`modules/rke2-cluster` fetches (`providers.tf`), not from a file path, so a
+fresh build completes in one apply. That kubeconfig is kept at
+`~/.kube/rke2-raw.yaml`, outside the checkout, since it's read back at plan
+time; `terraform apply` also writes a copy to `~/.kube/config`, replacing
+whatever is there, for `kubectl`.
+
+## First build and Sealed Secrets
+
+Secrets in k8s-infra and k8s-apps are committed as `SealedSecret`s, which only
+the controller holding the matching key can decrypt. A rebuilt cluster would
+generate a new key, so `modules/argocd` restores the previous one from
+`sealed_secrets_key_file` (default `/var/lib/terraform/sealed-secrets-key.yaml`)
+before Argo CD installs the controller.
+
+1. First build: `just apply`. No key file yet; the controller generates one
+   when k8s-infra's `sealed-secrets` Application syncs.
+2. `just seal-key-backup` to save it; copy it somewhere off the host too.
+3. `just seal-cert > ../k8s-infra/pub-cert.pem` (and the same for k8s-apps),
+   then seal and commit the secrets those repos expect; see their READMEs.
+
+Every later build restores the key automatically
+(`terraform output sealed_secrets_key_restored` shows whether it did).
 
 ## VM image
 
@@ -72,55 +107,36 @@ container toolkit are all baked in once, at image-build time — see
 of this in cloud-init on every clone.
 
 Updating the image (a new RKE2 version, a new hardening step) means
-rebuilding the templates (`just t-create`, or a subset via `packer build`)
-and then replacing each node's VM — there's no in-place "upgrade" command
-the way `talosctl upgrade --image ...` was.
-
-## Usage
-
-Task running is [`just`](https://github.com/casey/just), not Make; see
-`Justfile` for the full recipe list (`just --list`).
-
-```bash
-just t-create   # once, builds the Proxmox templates (see packer/README.md)
-just apply
-just generate   # writes ~/.kube/config and ~/.ssh/rke2_admin
-```
-
-`terraform apply` also writes the cluster's kubeconfig to `~/.kube/config`,
-replacing whatever is there, because the `helm` and `kubernetes` providers
-read it from that path to reach the cluster. The providers read the file
-when Terraform configures them, before anything is applied, so on a fresh
-build the addons only succeed once that file exists (a second `just apply`).
+rebuilding the templates (`just t-create`, or the Packer workflow) and then
+replacing each node's VM — there's no in-place "upgrade" command.
 
 ## Networking
 
 `cni = "cilium"` (the default) sets `cni: none` and `disable-kube-proxy: true`
-in every node's RKE2 config (`modules/rke2-config`), and the addons module
+in every node's RKE2 config (`modules/rke2-config`), and `module.cilium`
 installs Cilium to cover both roles. Set `cni = "flannel"` to leave RKE2's
-own bundled Canal + kube-proxy running instead, and leave `module.cilium`
-disabled.
+own bundled Canal + kube-proxy running instead.
 
-LoadBalancer services get an address from `load_balancer_ip_range`, announced on
-the LAN over ARP by Cilium L2 announcements. The range has to be free on the
-node subnet: outside any DHCP scope, clear of the node addresses and of
-`controlplane_vip`.
+LoadBalancer services get an address from the Cilium LB-IPAM pool, announced
+on the LAN over ARP by Cilium L2 announcements. The pool itself is defined in
+k8s-infra (`charts/cilium-lb-ipam/values.yaml`), not here: Cilium's own chart only turns
+L2 announcements on. The range has to be free on the node subnet: outside
+any DHCP scope, clear of the node addresses and of `controlplane_vip`.
 
-| Setting                  | Value                         |
-| ------------------------ | ----------------------------- |
-| Nodes                    | 192.168.1.201-192.168.1.206   |
-| Control-plane VIP        | 192.168.1.99                  |
-| LoadBalancer pool        | 192.168.1.60-192.168.1.98     |
+| Setting                  | Value                                   |
+| ------------------------ | --------------------------------------- |
+| Nodes                    | 192.168.1.201-192.168.1.206             |
+| Control-plane VIP        | 192.168.1.99                            |
+| LoadBalancer pool        | 192.168.1.60-192.168.1.98 (k8s-infra)   |
 
 The control-plane VIP is advertised by **kube-vip**, run as an RKE2
 auto-deployed manifest (`/var/lib/rancher/rke2/server/manifests/kube-vip.yaml`,
-written by `modules/rke2-config`) on the control-plane node — the RKE2-world
-replacement for Talos's `Layer2VIPConfig` patch. It's a `hostNetwork` pod
-using ARP, so it's reachable even before Cilium brings up pod networking.
-With only one control-plane node today, this mainly buys a stable address
-independent of that node's own IP; a second control-plane node later would
-get automatic failover via kube-vip's leader election with no client
-reconfiguration.
+written by `modules/rke2-config`) on the control-plane node. It's a
+`hostNetwork` pod using ARP, so it's reachable even before Cilium brings up
+pod networking. With only one control-plane node today, this mainly buys a
+stable address independent of that node's own IP; a second control-plane
+node later would get automatic failover via kube-vip's leader election with
+no client reconfiguration.
 
 Setting `external_ip` to a public IP or hostname adds it as a SAN on the
 control-plane's RKE2 `tls-san`, so a client outside the LAN validates TLS
@@ -130,74 +146,21 @@ rule you set up separately, and the external client needs its own
 kubeconfig with the endpoint changed to `external_ip`.
 
 `enable_hubble_ui = true` (the default) installs Hubble Relay and Hubble UI
-alongside Cilium: a web dashboard of the CNI's live traffic (service map,
-L3/L4/L7 flows, DNS, policy verdicts). It gets its own LoadBalancer address
-from the same pool, controlled by `hubble_ui_service_type`. See
-`modules/addons/cilium/README.md`'s "Hubble" section for what the module sets.
-
-## Storage
-
-`enable_longhorn = true` installs Longhorn and makes its `longhorn`
-StorageClass the cluster default, so PVCs provision dynamically without naming
-`storageClassName`. Unlike under Talos, turning this on needs no machine-config
-change and no reboot: a normal Ubuntu kubelet already sees `/var/lib/longhorn`
-with no extra mount configuration. `open-iscsi`/`util-linux`/`nfs-common`,
-which Longhorn's engine needs on the host, are baked into every node's image
-by `packer/scripts/install-longhorn-deps.sh` regardless of this flag.
-
-`longhorn_version` and `longhorn_replica_count` (default 3, matching the
-worker count) tune the release; see `modules/addons/longhorn/README.md` for
-what else the module sets and why.
-
-## Metrics
-
-`enable_metrics_server = true` (the default) installs metrics-server, giving
-`kubectl top node`/`kubectl top pod` and the HorizontalPodAutoscaler resource
-metrics to read. Touches no node provisioning and needs no reboot to turn on
-or off.
-
-`metrics_server_version` tunes the chart version; see
-`modules/addons/metrics-server/README.md` for the flags it sets
-(`--kubelet-insecure-tls` and `--kubelet-preferred-address-types`) — standard
-self-managed-kubelet workarounds, not specific to any one distro.
-
-## Monitoring
-
-`enable_prometheus = true` (default `false`) installs
-[kube-prometheus-stack](https://github.com/prometheus-community/helm-charts/tree/main/charts/kube-prometheus-stack):
-Prometheus, Alertmanager, Grafana, node-exporter, and kube-state-metrics, with
-default alerting rules and Kubernetes dashboards. Its PVCs default to the
-`longhorn` StorageClass, so it also needs `enable_longhorn = true`.
-
-`kube_prometheus_stack_version` tunes the chart version, and
-`grafana_admin_password` sets Grafana's login (defaults to the chart's own
-`"prom-operator"` — change it before relying on the default LoadBalancer
-exposure, which puts Grafana's login page on the LAN). See
-`modules/addons/prometheus/README.md` for the rest of the module's inputs, the
-privileged-namespace label node-exporter needs, and why
-`serviceMonitorSelectorNilUsesHelmValues` (and its `podMonitor`/`rule`
-equivalents) are turned off.
+alongside Cilium. Its Service is `ClusterIP` here, since the LB-IPAM pool
+doesn't exist yet while Cilium installs; k8s-infra's `lb-services` chart adds
+LoadBalancer Services for Hubble UI and the Argo CD server.
 
 ## GPU
 
 Setting `pcigpu` on a node in `var.nodes` passes that PCI device through to
 the VM (see `modules/proxmox-vm`) and clones it from the GPU template
 instead of the common one (`template_vm_id_gpu`, built by
-`packer/ubuntu-gpu.pkr.hcl` with the NVIDIA driver, container toolkit, and
-containerd runtime registration already baked in). Nothing else needs
-flipping: as soon as any node sets `pcigpu`, `module.nvidia_device_plugin`
-installs the NVIDIA device plugin so that node's GPU shows up as an
-`nvidia.com/gpu` resource for Kubernetes to schedule against, and creates
-the `nvidia` `RuntimeClass` GPU pods must set via `spec.runtimeClassName` to
-actually reach the GPU. See `modules/addons/nvidia-device-plugin/README.md`
-for what the module sets and why, including the pod-spec shape a GPU
-workload needs.
-
-`nvidia_device_plugin_version` tunes the chart version; there's no matching
-enable flag; unlike `enable_longhorn`, presence is derived entirely from
-`pcigpu`, which is already the single source of truth this repo uses to
-decide the VM template and image provisioning, so a second, independently
-toggled flag would only be one more thing to keep in sync.
+`packer/ubuntu-gpu.pkr.hcl` with the NVIDIA driver and container toolkit
+already baked in; RKE2 detects the toolkit's runtime and registers `nvidia`
+in containerd itself). Everything
+Kubernetes-side — the `nvidia` RuntimeClass, the device plugin, node
+labelling via NFD — comes from the NVIDIA GPU operator in k8s-infra, with its
+driver and toolkit components disabled because the image already has both.
 
 ## Hardening
 
@@ -206,37 +169,22 @@ SSH key-only auth with root login disabled, `ufw` default-deny with only the
 ports RKE2/SSH/Longhorn/Cilium/kube-vip actually need open,
 `unattended-upgrades` for security patches, `auditd`, a standard hardening
 sysctl set layered on top of RKE2's own, swap disabled, and AppArmor
-confirmed enforcing (Ubuntu's default). This is a deliberately lighter
-baseline than a full CIS Level 1 pass via Canonical's Ubuntu Security Guide
-(`usg`) — less compliance-grade, but lower risk of needing tuning against
-RKE2/Longhorn/Cilium's actual runtime requirements.
+confirmed enforcing (Ubuntu's default).
 
 RKE2 itself runs with `profile: cis` in every node's config
-(`modules/rke2-config`), independent of the OS-level baseline above — its
-prerequisites (the `etcd` user/group, RKE2's own shipped CIS sysctls) are
-applied in `packer/scripts/install-rke2.sh`, right after the RKE2 binary
-installs so it can read what that install shipped.
+(`modules/rke2-config`), which also enforces the `restricted` Pod Security
+Standard by default; namespaces that need more (Longhorn, monitoring, the
+GPU operator) are labelled by the Application that creates them in
+k8s-infra.
 
 ## Ordering
 
-Cloud-init + RKE2's own startup are asynchronous after a VM boots (unlike
-Talos's `talos_machine_bootstrap`, a synchronous API call), so addons need
-something to gate on before the cluster is reachable. `modules/rke2-cluster`
-provides exactly one gate, `wait_for_api` (on by default): poll the
-bootstrap node over SSH until `rke2-server` is active, then fetch its
-kubeconfig. There's no Kubernetes-level health check the way Talos's
-`data.talos_cluster_health` was — no equivalent RKE2 Terraform data source
-exists to skip node-readiness/coredns checks the way Talos could once it
-knew `cni: none` — so this only proves the API server exists, exactly as
-much as `wait_for_api` proved under Talos.
-
-Cilium, Longhorn, metrics-server, Prometheus, and the NVIDIA device plugin
-all depend on `module.rke2_cluster` for that guarantee. Anything needing
-real pod networking (Longhorn, metrics-server, Prometheus, the NVIDIA device
-plugin) additionally depends on `module.cilium`'s `helm_release` directly,
-since RKE2 never brings up pod networking itself when `cni` is `cilium`.
-Prometheus additionally depends on `module.longhorn` directly, since its
-PVCs need Longhorn's CSI controller actually running to provision.
+Cloud-init + RKE2's own startup are asynchronous after a VM boots, so
+`modules/rke2-cluster` provides one gate, `wait_for_api` (on by default):
+poll the bootstrap node over SSH until `rke2-server` is active, then fetch
+its kubeconfig. Cilium depends on that; Argo CD depends on Cilium, since its
+pods need pod networking. Ordering among addons and apps is Argo CD's job
+(sync waves in k8s-infra, retries in k8s-apps).
 
 `wait_for_api = false` disables the gate, which is also how you plan against
 a cluster that is powered off.

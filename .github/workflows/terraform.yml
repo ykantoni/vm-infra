@@ -5,20 +5,32 @@ on:
   push:
     branches:
       - main
-      - github
+  workflow_dispatch:
+
+# One Terraform run at a time against the runner's local state.
+concurrency:
+  group: terraform-state
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  PROXMOX_VE_ENDPOINT: ${{ secrets.PROXMOX_VE_ENDPOINT }}
+  PROXMOX_VE_API_TOKEN: ${{ secrets.PROXMOX_VE_API_TOKEN }}
+  TF_IN_AUTOMATION: "true"
 
 jobs:
-  terraform:
+  plan:
+    # Never run code from a fork on the self-hosted runner: it sits on the
+    # Proxmox host's network with its credentials.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+
     runs-on:
       - self-hosted
       - linux
       - terraform
       - proxmox
-
-    env:
-      PROXMOX_VE_ENDPOINT: ${{ secrets.PROXMOX_VE_ENDPOINT }}
-      PROXMOX_VE_API_TOKEN: ${{ secrets.PROXMOX_VE_API_TOKEN }}
-      KUBECONFIG: /home/github-runner/.kube/config
 
     steps:
       - name: Checkout
@@ -30,24 +42,58 @@ jobs:
           terraform_version: 1.16.4
           terraform_wrapper: false
 
-      - name: Check Terraform
-        run: |
-          which terraform
-          terraform version
-
       - name: Check Proxmox credentials
         run: |
           test -n "$PROXMOX_VE_ENDPOINT"
           test -n "$PROXMOX_VE_API_TOKEN"
 
       - name: Terraform Init
-        run: terraform init
+        run: terraform init -input=false
 
       - name: Terraform Format Check
-        run: terraform fmt -check
+        run: terraform fmt -check -recursive
 
       - name: Terraform Validate
         run: terraform validate
 
       - name: Terraform Plan
-        run: terraform plan
+        run: terraform plan -input=false -lock-timeout=5m
+
+  # Plans again and applies in the same job, instead of handing a saved plan
+  # to a second job through an artifact: a plan file embeds sensitive values
+  # (kubeconfig, SSH key), and artifacts of a public repository are public.
+  # Review the plan job's output before approving the "proxmox" environment.
+  apply:
+    needs: plan
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    environment: proxmox
+
+    runs-on:
+      - self-hosted
+      - linux
+      - terraform
+      - proxmox
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.16.4
+          terraform_wrapper: false
+
+      - name: Terraform Init
+        run: terraform init -input=false
+
+      - name: Terraform Plan
+        run: terraform plan -input=false -lock-timeout=5m -out=tfplan
+
+      - name: Terraform Apply
+        run: terraform apply -input=false -lock-timeout=5m tfplan
+
+      - name: Remove plan file
+        if: always()
+        run: rm -f tfplan

@@ -1,4 +1,4 @@
-# Builds the plain (no GPU) hardened Ubuntu 26.04 + RKE2 Proxmox template.
+# Builds the plain (no GPU) hardened Ubuntu 24.04 + RKE2 Proxmox template.
 # Clones the cloud-init-capable seed template that
 # vm-templates/import-ubuntu-cloud-image.sh creates, boots it with a
 # temporary Packer-managed SSH key (via the seed's own cloud-init drive,
@@ -18,9 +18,9 @@ source "proxmox-clone" "ubuntu_common" {
   clone_vm_id          = var.seed_template_vm_id
   full_clone           = true
   vm_id                = var.template_vm_id_common
-  vm_name              = "ubuntu-26.04-rke2-common"
-  template_name        = "ubuntu-26.04-rke2-common"
-  template_description = "Hardened Ubuntu 26.04 + RKE2 (no GPU). Built by packer/ubuntu-common.pkr.hcl."
+  vm_name              = "ubuntu-24.04-rke2-common"
+  template_name        = "ubuntu-24.04-rke2-common"
+  template_description = "Hardened Ubuntu 24.04 + RKE2 (no GPU). Built by packer/ubuntu-common.pkr.hcl."
 
   cores  = 2
   memory = 2048

@@ -9,17 +9,8 @@ controlplane_vip = "192.168.1.99"
 cni            = "cilium"
 cilium_version = "1.19.6"
 
-enable_longhorn = true
-
-# Prometheus/Alertmanager/Grafana PVCs default to the "longhorn" StorageClass,
-# so this depends on enable_longhorn = true above (order in this file doesn't
-# matter to Terraform, only that both are true).
-enable_prometheus = true
-
-load_balancer_ip_range = {
-  start = "192.168.1.60"
-  stop  = "192.168.1.98"
-}
+# Longhorn, Prometheus, metrics-server, the GPU operator and the
+# LoadBalancer address pool (192.168.1.60-98) are configured in k8s-infra.
 
 gateway = "192.168.1.1"
 

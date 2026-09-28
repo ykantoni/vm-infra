@@ -1,5 +1,0 @@
-apiVersion: v2
-name: cilium-lb-ipam
-description: LoadBalancer address pool and L2 announcement policy for Cilium
-type: application
-version: 0.1.0

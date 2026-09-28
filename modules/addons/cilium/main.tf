@@ -20,7 +20,7 @@ locals {
 
     # Ubuntu (systemd) already mounts cgroupv2 itself, same as Talos did;
     # kept false so Cilium doesn't try to remount it. Validate this still
-    # holds under RKE2/Ubuntu 26.04 rather than assuming.
+    # holds under RKE2/Ubuntu 24.04 rather than assuming.
     cgroup = {
       autoMount = {
         enabled = false
@@ -106,30 +106,6 @@ resource "helm_release" "cilium" {
   ]
 }
 
-# Ships as a chart rather than as plain manifests because the CRDs it depends on
-# are registered by the Cilium operator, and so do not exist at plan time.
-resource "helm_release" "cilium_lb_ipam" {
-  depends_on = [
-    helm_release.cilium
-  ]
-
-  name      = "cilium-lb-ipam"
-  namespace = "kube-system"
-
-  chart = "${path.module}/charts/cilium-lb-ipam"
-
-  values = [
-    yamlencode({
-      pool = {
-        name  = var.lb_ipam_pool_name
-        start = var.lb_ipam_range.start
-        stop  = var.lb_ipam_range.stop
-      }
-
-      l2Announcements = {
-        interfaces             = var.l2_announcement_interfaces
-        announceOnControlPlane = var.l2_announce_on_control_plane
-      }
-    })
-  ]
-}
+# The LoadBalancer address pool and L2 announcement policy that go with
+# l2announcements above live in k8s-infra (charts/cilium-lb-ipam), reconciled
+# by Argo CD: only the CNI itself has to exist before Argo CD can run.

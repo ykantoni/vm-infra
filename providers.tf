@@ -2,19 +2,37 @@ provider "proxmox" {
   insecure = true
 }
 
-# Reads the kubeconfig that local_sensitive_file.kubeconfig (main.tf) writes to
-# the same path. The file is read when the provider is configured, so on a
-# fresh build it must already exist (a prior apply, or `just generate`) before
-# the addons can be applied.
+# The helm and kubernetes providers are configured from the kubeconfig
+# module.rke2_cluster fetches, not from a file path, so a fresh build works in
+# one apply: on the first plan these values are unknown and Terraform defers
+# them until the cluster exists. try() keeps plan working when wait_for_api is
+# off and there's no kubeconfig at all.
+locals {
+  kubeconfig   = try(yamldecode(module.rke2_cluster.kubeconfig), null)
+  kube_cluster = try(local.kubeconfig.clusters[0].cluster, null)
+  kube_user    = try(local.kubeconfig.users[0].user, null)
+
+  kube_host                   = try(local.kube_cluster.server, null)
+  kube_cluster_ca_certificate = try(base64decode(local.kube_cluster["certificate-authority-data"]), null)
+  kube_client_certificate     = try(base64decode(local.kube_user["client-certificate-data"]), null)
+  kube_client_key             = try(base64decode(local.kube_user["client-key-data"]), null)
+}
+
 provider "helm" {
   kubernetes = {
-    config_path = pathexpand("~/.kube/config")
+    host                   = local.kube_host
+    cluster_ca_certificate = local.kube_cluster_ca_certificate
+    client_certificate     = local.kube_client_certificate
+    client_key             = local.kube_client_key
   }
 }
 
-# Used only for the handful of raw Kubernetes objects (namespace labels, and
-# the like) that don't belong inside a Helm release, per-addon. Configured the
-# same way as the helm provider, from the same kubeconfig.
+# Used only for the handful of raw Kubernetes objects (namespaces with Pod
+# Security labels, the restored Sealed Secrets key) that don't belong inside
+# a Helm release. Configured the same way as the helm provider.
 provider "kubernetes" {
-  config_path = pathexpand("~/.kube/config")
+  host                   = local.kube_host
+  cluster_ca_certificate = local.kube_cluster_ca_certificate
+  client_certificate     = local.kube_client_certificate
+  client_key             = local.kube_client_key
 }

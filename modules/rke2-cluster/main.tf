@@ -17,6 +17,8 @@ locals {
   ]
 
   ssh_key_path = "${path.module}/.ssh_key_${md5(var.ssh_private_key_pem)}"
+
+  kubeconfig_raw_path = var.kubeconfig_raw_path != "" ? var.kubeconfig_raw_path : "${path.module}/.kubeconfig_raw"
 }
 
 # The private key never appears in state on its own here (it's an input
@@ -75,12 +77,14 @@ resource "terraform_data" "fetch_kubeconfig" {
   provisioner "local-exec" {
     command = <<-EOT
       set -eu
+      mkdir -p "$(dirname "${local.kubeconfig_raw_path}")"
       ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
         -i "${local.ssh_key_path}" \
         "${var.ssh_admin_user}@${var.bootstrap_ip}" \
         "sudo cat /etc/rancher/rke2/rke2.yaml" \
         | sed "s#https://127.0.0.1:6443#https://${var.controlplane_vip}:6443#" \
-        > "${path.module}/.kubeconfig_raw"
+        > "${local.kubeconfig_raw_path}"
+      chmod 600 "${local.kubeconfig_raw_path}"
     EOT
   }
 }
@@ -92,5 +96,5 @@ data "local_file" "kubeconfig" {
     terraform_data.fetch_kubeconfig,
   ]
 
-  filename = "${path.module}/.kubeconfig_raw"
+  filename = local.kubeconfig_raw_path
 }

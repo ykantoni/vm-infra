@@ -12,13 +12,23 @@ apply:
     terraform apply -auto-approve
 
 # Destroy everything Terraform manages: the cluster and its VMs.
-# The patch only runs if the apiserver is reachable: if the cluster's
+# The kubectl steps only run if the apiserver is reachable: if the cluster's
 # already gone (e.g. this is a re-run after a prior destroy succeeded),
-# there's nothing left for Longhorn's setting to guard anyway.
+# there's nothing left for them to guard anyway.
+#  - Longhorn refuses to uninstall without its deleting-confirmation-flag.
+#  - Argo CD Applications carry a resources finalizer; once Argo CD itself is
+#    uninstalled nothing would remove it, and the argocd namespaces would hang
+#    in Terminating. Stripping it first makes deletion non-cascading, which is
+#    fine: the VMs underneath are going away regardless.
 destroy:
     if kubectl cluster-info --request-timeout=5s >/dev/null 2>&1; then \
       kubectl -n longhorn-system patch settings.longhorn.io deleting-confirmation-flag \
-        --type=merge -p '{"value":"true"}'; \
+        --type=merge -p '{"value":"true"}' || true; \
+      for app in $(kubectl get applications.argoproj.io -A \
+          -o jsonpath='{range .items[*]}{.metadata.namespace}/{.metadata.name}{"\n"}{end}' 2>/dev/null); do \
+        kubectl -n "${app%%/*}" patch application "${app#*/}" \
+          --type=merge -p '{"metadata":{"finalizers":null}}'; \
+      done; \
     fi
     terraform destroy -auto-approve
 
@@ -32,18 +42,11 @@ fmt:
 t-create:
     /usr/bin/bash -c "pushd packer && packer init . && packer build ubuntu-common.pkr.hcl && packer build ubuntu-gpu.pkr.hcl && popd"
 
-# Destroy the Postgres cluster.
-pg-destroy:
-    kubectl delete -f apps/postgres/postgres-primary-standby.yaml --ignore-not-found
-
-# Create the Postgres cluster.
-pg-create:
-    kubectl apply -f apps/postgres/postgres-primary-standby.yaml
-
-# Destroy both templates.
+# Destroy both templates. Skips a template that doesn't exist, so it's safe before a first build.
 t-destroy:
-    sudo /usr/sbin/qm destroy 9100
-    sudo /usr/sbin/qm destroy 9101
+    for id in 9100 9101; do \
+      if sudo /usr/sbin/qm status "$id" >/dev/null 2>&1; then sudo /usr/sbin/qm destroy "$id"; fi; \
+    done
 
 # Write kubeconfig and an SSH key for ssh_admin_user from Terraform outputs.
 generate:
@@ -51,3 +54,19 @@ generate:
     terraform output -raw kubeconfig > "$HOME/.kube/config"
     terraform output -raw ssh_private_key > "$HOME/.ssh/rke2_admin"
     chmod 600 "$HOME/.kube/config" "$HOME/.ssh/rke2_admin"
+
+# Print Argo CD's initial admin password.
+argocd-password:
+    kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d; echo
+
+# Back up the Sealed Secrets controller's key pair to where the next build
+# restores it from (var.sealed_secrets_key_file). Run once after the first
+# build, once k8s-infra has installed the controller. Keep a copy off-host too.
+seal-key-backup file="/var/lib/terraform/sealed-secrets-key.yaml":
+    umask 077; kubectl -n kube-system get secret -l sealedsecrets.bitnami.com/sealed-secrets-key -o yaml > "{{file}}"
+    echo "Saved to {{file}}"
+
+# Print the Sealed Secrets public cert, to commit as pub-cert.pem in k8s-infra
+# and k8s-apps so secrets can be sealed offline.
+seal-cert:
+    kubeseal --controller-namespace kube-system --controller-name sealed-secrets-controller --fetch-cert

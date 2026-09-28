@@ -32,6 +32,12 @@ variable "api_wait_interval" {
   default = 5
 }
 
+variable "kubeconfig_raw_path" {
+  description = "Where the fetched kubeconfig is written and read back from. Must survive between runs (it's read at plan time to configure the helm and kubernetes providers), so in CI it must live outside the checkout, which actions/checkout wipes. Empty means inside this module's directory."
+  type        = string
+  default     = ""
+}
+
 variable "nodes" {
   description = "module.proxmox_vm.nodes -- deliberately VM-output-derived, not the raw var.nodes, so this module's resources only run once the VMs actually exist"
 

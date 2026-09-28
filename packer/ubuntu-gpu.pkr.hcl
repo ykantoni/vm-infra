@@ -13,9 +13,9 @@ source "proxmox-clone" "ubuntu_gpu" {
   clone_vm_id          = var.seed_template_vm_id
   full_clone           = true
   vm_id                = var.template_vm_id_gpu
-  vm_name              = "ubuntu-26.04-rke2-gpu"
-  template_name        = "ubuntu-26.04-rke2-gpu"
-  template_description = "Hardened Ubuntu 26.04 + RKE2 + NVIDIA driver/toolkit. Built by packer/ubuntu-gpu.pkr.hcl."
+  vm_name              = "ubuntu-24.04-rke2-gpu"
+  template_name        = "ubuntu-24.04-rke2-gpu"
+  template_description = "Hardened Ubuntu 24.04 + RKE2 + NVIDIA driver/toolkit. Built by packer/ubuntu-gpu.pkr.hcl."
 
   cores  = 2
   memory = 2048

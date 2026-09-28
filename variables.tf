@@ -96,9 +96,9 @@ variable "enable_hubble_ui" {
 }
 
 variable "hubble_ui_service_type" {
-  description = "Kubernetes Service type Hubble UI's web UI is exposed as. LoadBalancer (the default) gets an address from Cilium's load_balancer_ip_range, since this cluster runs no ingress controller; see the root README's \"Networking\" section."
+  description = "Kubernetes Service type Hubble UI's web UI is exposed as. ClusterIP (the default): the LB-IPAM pool comes later from k8s-infra, and k8s-infra's lb-services chart puts a LoadBalancer Service in front of Hubble UI once it exists."
   type        = string
-  default     = "LoadBalancer"
+  default     = "ClusterIP"
 }
 
 variable "wait_for_api" {
@@ -107,77 +107,40 @@ variable "wait_for_api" {
   default     = true
 }
 
-variable "enable_longhorn" {
-  description = "Install Longhorn as the cluster's default CSI provider for dynamic PV provisioning. Unlike under Talos, this needs no machine-config change or reboot to turn on: a normal Ubuntu kubelet already sees /var/lib/longhorn with no extra mount configuration."
-  type        = bool
-  default     = false
-}
-
-variable "longhorn_version" {
-  description = "Longhorn Helm chart version"
+variable "argocd_chart_version" {
+  description = "argo-cd Helm chart version; see modules/argocd"
   type        = string
-  default     = "1.8.1"
+  default     = "8.3.0"
 }
 
-variable "longhorn_replica_count" {
-  description = "Default number of replicas Longhorn keeps for each volume"
-  type        = number
-  default     = 3
-}
-
-variable "enable_metrics_server" {
-  description = "Install metrics-server, so kubectl top and the HorizontalPodAutoscaler have resource metrics to read. Unlike enable_longhorn, this touches no machine configuration and needs no reboot, so it defaults on."
-  type        = bool
-  default     = true
-}
-
-variable "metrics_server_version" {
-  description = "metrics-server Helm chart version"
+variable "argocd_apps_chart_version" {
+  description = "argocd-apps Helm chart version; see modules/argocd"
   type        = string
-  default     = "3.14.0"
+  default     = "2.0.2"
 }
 
-variable "enable_prometheus" {
-  description = "Install kube-prometheus-stack (Prometheus, Grafana, Alertmanager, node-exporter, kube-state-metrics) for cluster monitoring. Its PVCs default to the \"longhorn\" StorageClass (see modules/addons/prometheus's storage_class default), so this needs enable_longhorn = true too. Touches no machine configuration and needs no reboot on its own."
-  type        = bool
-  default     = false
-}
-
-variable "kube_prometheus_stack_version" {
-  description = "kube-prometheus-stack Helm chart version"
+variable "k8s_infra_repo_url" {
+  description = "Git repository Argo CD reconciles cluster addons from"
   type        = string
-  default     = "90.0.0"
+  default     = "https://github.com/ykantoni/k8s-infra.git"
 }
 
-variable "grafana_admin_password" {
-  description = "Grafana admin login password. Defaults to the chart's own default (\"prom-operator\"); override before relying on enable_prometheus's default LoadBalancer exposure, which puts Grafana's login page on the LAN."
+variable "k8s_apps_repo_url" {
+  description = "Git repository Argo CD reconciles applications from"
   type        = string
-  default     = "prom-operator"
-  sensitive   = true
+  default     = "https://github.com/ykantoni/k8s-apps.git"
 }
 
-variable "nvidia_device_plugin_version" {
-  description = "nvidia-device-plugin Helm chart version. Only installed when at least one node in var.nodes sets pcigpu; see modules/addons/nvidia-device-plugin."
+variable "gitops_target_revision" {
+  description = "Branch, tag or commit Argo CD tracks in both k8s-infra and k8s-apps"
   type        = string
-  default     = "0.20.0"
+  default     = "main"
 }
 
-variable "load_balancer_ip_range" {
-  description = "Inclusive address range Cilium hands to LoadBalancer services. Must be free on the node subnet."
-
-  type = object({
-    start = string
-    stop  = string
-  })
-
-  validation {
-    condition = alltrue([
-      can(cidrhost("${var.load_balancer_ip_range.start}/32", 0)),
-      can(cidrhost("${var.load_balancer_ip_range.stop}/32", 0)),
-    ])
-
-    error_message = "load_balancer_ip_range start and stop must both be IPv4 addresses."
-  }
+variable "sealed_secrets_key_file" {
+  description = "Backup of the Sealed Secrets controller's key pair on the machine running Terraform (the self-hosted runner), restored on every build so committed SealedSecrets keep decrypting. Written by `just seal-key-backup` after the first build; never committed. See modules/argocd/README.md."
+  type        = string
+  default     = "/var/lib/terraform/sealed-secrets-key.yaml"
 }
 
 variable "nodes" {
