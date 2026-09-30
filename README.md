@@ -125,7 +125,7 @@ any DHCP scope, clear of the node addresses and of `controlplane_vip`.
 
 | Setting                  | Value                                   |
 | ------------------------ | --------------------------------------- |
-| Nodes                    | 192.168.1.201-192.168.1.206             |
+| Nodes                    | 192.168.1.201-192.168.1.204             |
 | Control-plane VIP        | 192.168.1.99                            |
 | LoadBalancer pool        | 192.168.1.60-192.168.1.98 (k8s-infra)   |
 

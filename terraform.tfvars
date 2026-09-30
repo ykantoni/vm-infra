@@ -64,26 +64,4 @@ nodes = {
     memory = 8192
     disk   = 50
   }
-
-  worker4 = {
-    vm_id  = 10004
-    name   = "w4"
-    ip     = "192.168.1.205"
-    mac    = "BC:24:11:00:01:05"
-    role   = "worker"
-    cores  = 4
-    memory = 8192
-    disk   = 50
-  }
-
-  worker5 = {
-    vm_id  = 10005
-    name   = "w5"
-    ip     = "192.168.1.206"
-    mac    = "BC:24:11:00:01:06"
-    role   = "worker"
-    cores  = 4
-    memory = 8192
-    disk   = 50
-  }
 }
