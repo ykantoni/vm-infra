@@ -31,8 +31,23 @@ source "proxmox-clone" "ubuntu_common" {
   cloud_init              = true
   cloud_init_storage_pool = var.datastore_id
 
+  # Stock Ubuntu cloud images don't ship qemu-guest-agent, so Packer's
+  # default agent-based IP discovery just hangs until ssh_timeout. A
+  # throwaway static IP (outside var.nodes' range and the LB pool) sidesteps
+  # that entirely -- this address is never used beyond this build.
+  network_adapters {
+    model  = "virtio"
+    bridge = "vmbr0"
+  }
+  ipconfig {
+    ip      = "192.168.1.97/24"
+    gateway = "192.168.1.1"
+  }
+  qemu_agent = false
+
   ssh_username         = "packer"
   ssh_private_key_file = var.packer_ssh_private_key_file
+  ssh_host             = "192.168.1.97"
   ssh_timeout          = "10m"
 }
 

@@ -23,8 +23,22 @@ source "proxmox-clone" "ubuntu_gpu" {
   cloud_init              = true
   cloud_init_storage_pool = var.datastore_id
 
+  # See ubuntu-common.pkr.hcl: sidesteps the qemu-guest-agent dependency
+  # that would otherwise hang IP discovery. Different throwaway IP so this
+  # build can't collide with ubuntu-common's if both ever ran concurrently.
+  network_adapters {
+    model  = "virtio"
+    bridge = "vmbr0"
+  }
+  ipconfig {
+    ip      = "192.168.1.98/24"
+    gateway = "192.168.1.1"
+  }
+  qemu_agent = false
+
   ssh_username         = "packer"
   ssh_private_key_file = var.packer_ssh_private_key_file
+  ssh_host             = "192.168.1.98"
   ssh_timeout          = "10m"
 }
 
