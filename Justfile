@@ -40,7 +40,7 @@ fmt:
 # clone from, and the GPU one (vm_id 9101) GPU-tagged nodes clone from. Run
 # vm-templates/import-ubuntu-cloud-image.sh once first (see packer/README.md).
 t-create:
-    /usr/bin/bash -c "pushd packer && packer init . && packer build ubuntu-common.pkr.hcl && packer build ubuntu-gpu.pkr.hcl && popd"
+    /usr/bin/bash -c "pushd packer && packer init . && packer build -only='proxmox-clone.ubuntu_common' . && packer build -only='proxmox-clone.ubuntu_gpu' . && popd"
 
 # Destroy both templates. Skips a template that doesn't exist, so it's safe before a first build.
 t-destroy:
