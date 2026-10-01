@@ -7,6 +7,11 @@ set -euo pipefail
 
 export DEBIAN_FRONTEND=noninteractive
 
+# cloud-init's own first-boot modules (package index refresh, etc.) can
+# still be holding the apt lock right when SSH becomes available -- wait for
+# it to fully finish before touching apt ourselves.
+cloud-init status --wait
+
 apt-get update
 apt-get install -y --no-install-recommends \
   ufw \
