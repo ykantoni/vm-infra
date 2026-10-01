@@ -52,6 +52,17 @@ source "proxmox-clone" "ubuntu_common" {
   }
   qemu_agent = false
 
+  # The seed's disk (vm-templates/import-ubuntu-cloud-image.sh) is sized for
+  # a stock cloud image (3.5G), not for RKE2 + this build's own apt cache --
+  # grow it on clone. Irrelevant to real nodes' disk size: modules/proxmox-vm
+  # sets that explicitly (var.nodes[*].disk) on every clone of the finished
+  # template, independent of the template's own disk size.
+  disks {
+    type         = "scsi"
+    storage_pool = var.datastore_id
+    disk_size    = "20G"
+  }
+
   ssh_username         = "packer"
   ssh_private_key_file = var.packer_ssh_private_key_file
   ssh_host             = "192.168.1.97"
