@@ -25,6 +25,13 @@ source "proxmox-clone" "ubuntu_common" {
   cores  = 2
   memory = 2048
 
+  # Match the seed template's hardware instead of the plugin's own defaults
+  # (lsi/kvm64): the seed only ever booted successfully under
+  # virtio-scsi-pci/host, and the plugin doesn't inherit these from the
+  # source VM on clone -- it fills anything unset from its own defaults.
+  scsi_controller = "virtio-scsi-pci"
+  cpu_type        = "host"
+
   # Ephemeral cloud-init identity for this build only -- overwritten
   # entirely by modules/rke2-config on every real clone of the resulting
   # template.

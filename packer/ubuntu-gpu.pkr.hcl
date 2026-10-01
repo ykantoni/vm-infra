@@ -20,6 +20,11 @@ source "proxmox-clone" "ubuntu_gpu" {
   cores  = 2
   memory = 2048
 
+  # See ubuntu-common.pkr.hcl: match the seed template's hardware instead of
+  # the plugin's own clone defaults.
+  scsi_controller = "virtio-scsi-pci"
+  cpu_type        = "host"
+
   cloud_init              = true
   cloud_init_storage_pool = var.datastore_id
 
