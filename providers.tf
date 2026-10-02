@@ -1,5 +1,16 @@
 provider "proxmox" {
   insecure = true
+
+  # Proxmox's API has no upload endpoint for snippets at all, so
+  # proxmox_virtual_environment_file (modules/rke2-config's per-node
+  # cloud-init) always writes them over SSH regardless of storage content
+  # types. github-runner has its own keypair for this, self-authorized
+  # (not root): see runner/README.md.
+  ssh {
+    agent       = false
+    username    = "github-runner"
+    private_key = file("/home/github-runner/.ssh/id_ed25519")
+  }
 }
 
 # The helm and kubernetes providers are configured from the kubeconfig
