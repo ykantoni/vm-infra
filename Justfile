@@ -42,10 +42,16 @@ fmt:
 t-create:
     /usr/bin/bash -c "pushd packer && packer init . && packer build -only='proxmox-clone.ubuntu_common' . && packer build -only='proxmox-clone.ubuntu_gpu' . && popd"
 
-# Destroy both templates. Skips a template that doesn't exist, so it's safe before a first build.
+# Destroy both templates. Idempotent (qm destroy itself no-ops with a
+# harmless message on an already-absent VM) so it's safe before a first
+# build. Deliberately doesn't pre-check with `qm status` first -- that
+# check has been observed racing with a VM that was *just* converted to a
+# template by the previous build (status transiently fails right after
+# `qm template`), which skips the destroy silently and leaves the next
+# build's clone step hitting "config file already exists".
 t-destroy:
     for id in 9100 9101; do \
-      if sudo /usr/sbin/qm status "$id" >/dev/null 2>&1; then sudo /usr/sbin/qm destroy "$id"; fi; \
+      sudo /usr/sbin/qm destroy "$id" || true; \
     done
 
 # Write kubeconfig and an SSH key for ssh_admin_user from Terraform outputs.
