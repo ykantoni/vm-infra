@@ -19,7 +19,14 @@ apt-get install -y --no-install-recommends \
   ufw \
   unattended-upgrades \
   auditd \
-  audispd-plugins
+  audispd-plugins \
+  qemu-guest-agent
+
+# modules/proxmox-vm sets agent { enabled = true } on every real node clone,
+# which needs this running to report back IPs etc. -- packer's own
+# qemu_agent = false in *.pkr.hcl only means "don't rely on it during THIS
+# build" (it isn't installed yet at that point), not "skip installing it".
+systemctl enable --now qemu-guest-agent
 
 # --- SSH: key-only, no root login ---
 # modules/rke2-config's cloud-init is the only thing that ever adds an
