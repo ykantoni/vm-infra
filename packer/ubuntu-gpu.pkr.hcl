@@ -41,14 +41,8 @@ source "proxmox-clone" "ubuntu_gpu" {
   }
   qemu_agent = false
 
-  # See ubuntu-common.pkr.hcl: the seed's 3.5G disk isn't enough once the
-  # NVIDIA driver/CUDA packages (~150M download, ~500M installed) stack on
-  # top of RKE2 + Longhorn deps.
-  disks {
-    type         = "scsi"
-    storage_pool = var.datastore_id
-    disk_size    = "20G"
-  }
+  # See ubuntu-common.pkr.hcl: disk size comes from the seed template, not
+  # a disks{} block here (confirmed not to resize the clone's scsi0).
 
   ssh_username         = "packer"
   ssh_private_key_file = var.packer_ssh_private_key_file
