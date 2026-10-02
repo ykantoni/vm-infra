@@ -20,11 +20,33 @@ source "proxmox-clone" "ubuntu_gpu" {
   cores  = 2
   memory = 2048
 
+  # See ubuntu-common.pkr.hcl: match the seed template's hardware instead of
+  # the plugin's own clone defaults.
+  scsi_controller = "virtio-scsi-pci"
+  cpu_type        = "host"
+
   cloud_init              = true
   cloud_init_storage_pool = var.datastore_id
 
+  # See ubuntu-common.pkr.hcl: sidesteps the qemu-guest-agent dependency
+  # that would otherwise hang IP discovery. Different throwaway IP so this
+  # build can't collide with ubuntu-common's if both ever ran concurrently.
+  network_adapters {
+    model  = "virtio"
+    bridge = "vmbr0"
+  }
+  ipconfig {
+    ip      = "192.168.1.98/24"
+    gateway = "192.168.1.1"
+  }
+  qemu_agent = false
+
+  # See ubuntu-common.pkr.hcl: disk size comes from the seed template, not
+  # a disks{} block here (confirmed not to resize the clone's scsi0).
+
   ssh_username         = "packer"
   ssh_private_key_file = var.packer_ssh_private_key_file
+  ssh_host             = "192.168.1.98"
   ssh_timeout          = "10m"
 }
 

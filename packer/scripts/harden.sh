@@ -7,6 +7,13 @@ set -euo pipefail
 
 export DEBIAN_FRONTEND=noninteractive
 
+# cloud-init's own first-boot modules (package index refresh, etc.) can
+# still be holding the apt lock right when SSH becomes available -- wait for
+# it to fully finish before touching apt ourselves. Exit code 2 means
+# "finished, but some module hit a recoverable error" -- still fine for our
+# purposes, we only care that it's done, not that every module succeeded.
+cloud-init status --wait || [ "$?" -eq 2 ]
+
 apt-get update
 apt-get install -y --no-install-recommends \
   ufw \

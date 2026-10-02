@@ -3,4 +3,6 @@
 .kube/
 kubeconfig
 *.log
+*.tfstate
+*.tfstate.*
 

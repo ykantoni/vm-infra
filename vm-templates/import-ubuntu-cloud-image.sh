@@ -35,6 +35,16 @@ qm set "${VMID}" --efidisk0 "${STORAGE}:1,efitype=4m,pre-enrolled-keys=0"
 qm importdisk "${VMID}" "${IMAGE_FILE}" "${STORAGE}"
 qm set "${VMID}" --scsihw virtio-scsi-pci --scsi0 "${STORAGE}:${VMID}/vm-${VMID}-disk-1.raw"
 
+# Grow now, while the disk is still a plain mutable VM disk: once `qm
+# template` below runs, Proxmox marks the backing file immutable at the
+# storage layer (renamed to base-*.raw), and neither a later `qm resize` nor
+# packer/*.pkr.hcl's own disks{} block (confirmed: silently falls through
+# to allocating an unused extra disk at the next free slot instead of
+# resizing scsi0, since scsi0 is already occupied by the clone) can touch it
+# after that point. The stock cloud image's 3.5G is enough for the common
+# build but not once the NVIDIA/CUDA packages stack on top in the gpu one.
+qm resize "${VMID}" scsi0 20G
+
 # Cloud-init drive: this is what lets Packer's proxmox-clone builder boot a
 # clone of this seed with temporary credentials (an SSH key it controls) to
 # run provisioners over. modules/rke2-config's per-node cloud-init replaces

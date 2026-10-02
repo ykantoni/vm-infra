@@ -8,7 +8,20 @@ set -euo pipefail
 
 RKE2_CHANNEL="${RKE2_CHANNEL:-stable}"
 
-curl -sfL https://get.rke2.io | INSTALL_RKE2_CHANNEL="${RKE2_CHANNEL}" sh -
+# get.rke2.io resolves RKE2_CHANNEL to a version via a separate call to
+# update.rke2.io; a transient failure there makes it silently fall back to
+# treating the channel name itself as the version (e.g. a literal "stable"
+# release, which 404s), rather than a clean error. Retry the whole install
+# rather than special-casing that -- indistinguishable from a worse-but-also-
+# transient failure further into the same pipeline.
+for attempt in 1 2 3; do
+  if curl -sfL https://get.rke2.io | INSTALL_RKE2_CHANNEL="${RKE2_CHANNEL}" sh -; then
+    break
+  elif [ "$attempt" -eq 3 ]; then
+    exit 1
+  fi
+  sleep 5
+done
 
 # CIS-profile prerequisites (modules/rke2-config sets profile: cis in every
 # node's config.yaml). RKE2 ships the required sysctls alongside the binary;

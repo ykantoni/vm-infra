@@ -25,14 +25,44 @@ source "proxmox-clone" "ubuntu_common" {
   cores  = 2
   memory = 2048
 
+  # Match the seed template's hardware instead of the plugin's own defaults
+  # (lsi/kvm64): the seed only ever booted successfully under
+  # virtio-scsi-pci/host, and the plugin doesn't inherit these from the
+  # source VM on clone -- it fills anything unset from its own defaults.
+  scsi_controller = "virtio-scsi-pci"
+  cpu_type        = "host"
+
   # Ephemeral cloud-init identity for this build only -- overwritten
   # entirely by modules/rke2-config on every real clone of the resulting
   # template.
   cloud_init              = true
   cloud_init_storage_pool = var.datastore_id
 
+  # Stock Ubuntu cloud images don't ship qemu-guest-agent, so Packer's
+  # default agent-based IP discovery just hangs until ssh_timeout. A
+  # throwaway static IP (outside var.nodes' range and the LB pool) sidesteps
+  # that entirely -- this address is never used beyond this build.
+  network_adapters {
+    model  = "virtio"
+    bridge = "vmbr0"
+  }
+  ipconfig {
+    ip      = "192.168.1.97/24"
+    gateway = "192.168.1.1"
+  }
+  qemu_agent = false
+
+  # Disk size comes from the seed template itself
+  # (vm-templates/import-ubuntu-cloud-image.sh resizes it before templating)
+  # -- a disks{} block here doesn't resize the clone's already-occupied
+  # scsi0, it silently allocates an extra unused disk at the next free slot
+  # instead. Irrelevant to real nodes' disk size either way: modules/proxmox-vm
+  # sets that explicitly (var.nodes[*].disk) on every clone of the finished
+  # template.
+
   ssh_username         = "packer"
   ssh_private_key_file = var.packer_ssh_private_key_file
+  ssh_host             = "192.168.1.97"
   ssh_timeout          = "10m"
 }
 
