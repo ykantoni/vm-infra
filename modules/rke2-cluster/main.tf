@@ -89,11 +89,42 @@ resource "terraform_data" "fetch_kubeconfig" {
   }
 }
 
-data "local_file" "kubeconfig" {
+# rke2-server reporting active (wait_for_rke2_server) only means the local
+# process on the bootstrap node started -- it says nothing about the VIP,
+# which kube-vip only starts advertising once its own pod is scheduled,
+# image-pulled, started, and has won leader election. Every consumer of this
+# module's kubeconfig (helm/kubernetes providers, Cilium, Argo CD) talks to
+# the VIP specifically (fetch_kubeconfig rewrites the server URL to it), so
+# without this gate the first of them to run would race kube-vip's own
+# startup: "dial tcp <vip>:6443: connect: no route to host", transient and
+# gone by the time anyone checks manually a few seconds later.
+resource "terraform_data" "wait_for_vip" {
   count = var.wait_for_api ? 1 : 0
 
   depends_on = [
     terraform_data.fetch_kubeconfig,
+  ]
+
+  provisioner "local-exec" {
+    command = <<-EOT
+      set -eu
+      end=$(( $(date +%s) + ${var.api_wait_timeout} ))
+      until curl -sk --max-time 5 -o /dev/null "https://${var.controlplane_vip}:6443/version"; do
+        if [ "$(date +%s)" -ge "$end" ]; then
+          echo "VIP ${var.controlplane_vip}:6443 was not reachable within ${var.api_wait_timeout}s" >&2
+          exit 1
+        fi
+        sleep ${var.api_wait_interval}
+      done
+    EOT
+  }
+}
+
+data "local_file" "kubeconfig" {
+  count = var.wait_for_api ? 1 : 0
+
+  depends_on = [
+    terraform_data.wait_for_vip,
   ]
 
   filename = local.kubeconfig_raw_path
