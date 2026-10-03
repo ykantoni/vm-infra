@@ -27,9 +27,13 @@ done
 # node's config.yaml). RKE2 ships the required sysctls alongside the binary;
 # see https://docs.rke2.io/security/hardening_guide for the current list --
 # this just applies whatever that install shipped, so it tracks RKE2 version
-# changes automatically rather than hardcoding values here.
-if [ -f /usr/share/rke2/rke2-cis-sysctl.conf ]; then
-  cp /usr/share/rke2/rke2-cis-sysctl.conf /etc/sysctl.d/60-rke2-cis.conf
+# changes automatically rather than hardcoding values here. get.rke2.io
+# installs under /usr/local (not /usr/share) -- without this, rke2-server
+# crash-loops at startup with "invalid kernel parameter value" for whichever
+# of these it validates, since profile: cis enforces them regardless of
+# whether this file made it onto the running kernel.
+if [ -f /usr/local/share/rke2/rke2-cis-sysctl.conf ]; then
+  cp /usr/local/share/rke2/rke2-cis-sysctl.conf /etc/sysctl.d/60-rke2-cis.conf
   sysctl -p /etc/sysctl.d/60-rke2-cis.conf
 fi
 
