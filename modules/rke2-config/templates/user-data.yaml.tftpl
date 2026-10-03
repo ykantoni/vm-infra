@@ -88,6 +88,14 @@ write_files:
           - key: node.kubernetes.io/not-ready
             operator: Exists
             effect: NoExecute
+          # A NotReady node carries this as a *separate* taint from the
+          # NoExecute one above (Kubernetes adds both), and the scheduler
+          # enforces each independently -- missing this one left kube-vip
+          # permanently Pending ("untolerated taint(s)"), which is a deadlock
+          # since nothing else can become Ready without the VIP it provides.
+          - key: node.kubernetes.io/not-ready
+            operator: Exists
+            effect: NoSchedule
         containers:
           - name: kube-vip
             image: ghcr.io/kube-vip/kube-vip:v0.8.7
