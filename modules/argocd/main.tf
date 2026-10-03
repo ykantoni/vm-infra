@@ -69,7 +69,11 @@ locals {
       # Application objects, and only in its own namespace.
       bootstrap-infra = {
         namespace   = var.namespace
-        description = "Root app-of-apps for k8s-infra: Applications in ${var.namespace} only"
+        # No ": " in this string -- the argocd-apps chart renders
+        # description unquoted (`description: {{ . }}`), and an embedded
+        # colon-space produces invalid YAML ("mapping values are not
+        # allowed in this context").
+        description = "Root app-of-apps for k8s-infra -- Applications in ${var.namespace} only"
         sourceRepos = [var.k8s_infra_repo_url]
         destinations = [{
           server    = local.in_cluster
@@ -81,7 +85,8 @@ locals {
 
       bootstrap-apps = {
         namespace   = var.namespace
-        description = "Root app-of-apps for k8s-apps: Applications in ${var.apps_namespace} only"
+        # See bootstrap-infra above: no ": " in this string either.
+        description = "Root app-of-apps for k8s-apps -- Applications in ${var.apps_namespace} only"
         sourceRepos = [var.k8s_apps_repo_url]
         destinations = [{
           server    = local.in_cluster
