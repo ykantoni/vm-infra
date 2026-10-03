@@ -75,6 +75,44 @@ write_files:
   - path: /var/lib/rancher/rke2/server/manifests/kube-vip.yaml
     permissions: "0600"
     content: |
+      # kube-vip's own ServiceAccount + RBAC, rather than widening the
+      # shared "default" one: it needs to manage Leases for leader election,
+      # which profile: cis's tight default RBAC doesn't grant by default
+      # ("... is forbidden: ... cannot get resource "leases" ...").
+      apiVersion: v1
+      kind: ServiceAccount
+      metadata:
+        name: kube-vip
+        namespace: kube-system
+      ---
+      apiVersion: rbac.authorization.k8s.io/v1
+      kind: ClusterRole
+      metadata:
+        name: system:kube-vip-role
+      rules:
+        - apiGroups: [""]
+          resources: ["services", "services/status", "nodes", "endpoints"]
+          verbs: ["list", "get", "watch", "update"]
+        - apiGroups: ["coordination.k8s.io"]
+          resources: ["leases"]
+          verbs: ["list", "get", "watch", "update", "create"]
+        - apiGroups: ["discovery.k8s.io"]
+          resources: ["endpointslices"]
+          verbs: ["list", "get", "watch", "update"]
+      ---
+      apiVersion: rbac.authorization.k8s.io/v1
+      kind: ClusterRoleBinding
+      metadata:
+        name: system:kube-vip-binding
+      roleRef:
+        apiGroup: rbac.authorization.k8s.io
+        kind: ClusterRole
+        name: system:kube-vip-role
+      subjects:
+        - kind: ServiceAccount
+          name: kube-vip
+          namespace: kube-system
+      ---
       apiVersion: v1
       kind: Pod
       metadata:
@@ -82,6 +120,13 @@ write_files:
         namespace: kube-system
       spec:
         hostNetwork: true
+        serviceAccountName: kube-vip
+        # profile: cis disables ServiceAccount token automount cluster-wide
+        # (CIS benchmark hardening) by default; kube-vip needs its token to
+        # reach the API for leader election, so this pod has to opt back in
+        # explicitly. Without this it crash-loops: "open
+        # .../serviceaccount/token: no such file".
+        automountServiceAccountToken: true
         tolerations:
           - key: node-role.kubernetes.io/control-plane
             effect: NoSchedule
@@ -114,6 +159,16 @@ write_files:
               - { name: vip_address, value: "${controlplane_vip}" }
               - { name: vip_leaderelection, value: "true" }
               - { name: svc_enable, value: "false" }
+              # kube-vip's in-cluster client defaults to the API's ClusterIP
+              # (10.43.x.x), which is unroutable with cni: none and
+              # disable-kube-proxy: true -- nothing can route to a Service IP
+              # until Cilium is up, but Cilium's own install needs the VIP
+              # this pod provides, a deadlock otherwise. hostNetwork: true
+              # means bootstrap_ip (this node's real address) is directly
+              # reachable, so point the client there instead of the
+              # auto-injected KUBERNETES_SERVICE_HOST/PORT.
+              - { name: KUBERNETES_SERVICE_HOST, value: "${bootstrap_ip}" }
+              - { name: KUBERNETES_SERVICE_PORT, value: "6443" }
 %{ endif ~}
 
 runcmd:
