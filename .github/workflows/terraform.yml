@@ -85,6 +85,15 @@ jobs:
           terraform_version: 1.16.4
           terraform_wrapper: false
 
+      # Proxmox's API has no upload endpoint for snippets, so
+      # proxmox_virtual_environment_file writes them over SSH as
+      # github-runner (providers.tf). Whatever recreates this directory when
+      # it's emptied (observed after a `terraform destroy`) resets it to
+      # root:root 755, silently breaking that write -- reassert group-write
+      # every run rather than relying on a one-time host change surviving.
+      - name: Ensure snippets directory is writable
+        run: sudo /usr/sbin/snippets-perms-fix
+
       - name: Terraform Init
         run: terraform init -input=false
 
