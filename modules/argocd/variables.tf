@@ -55,6 +55,7 @@ variable "k8s_infra_chart_repos" {
     "https://prometheus-community.github.io/helm-charts",
     "https://helm.ngc.nvidia.com/nvidia",
     "https://charts.external-secrets.io",
+    "https://openbao.github.io/openbao-helm",
   ]
 }
 
