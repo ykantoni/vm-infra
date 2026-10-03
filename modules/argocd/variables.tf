@@ -54,6 +54,7 @@ variable "k8s_infra_chart_repos" {
     "https://cloudnative-pg.github.io/charts",
     "https://prometheus-community.github.io/helm-charts",
     "https://helm.ngc.nvidia.com/nvidia",
+    "https://charts.external-secrets.io",
   ]
 }
 
