@@ -10,6 +10,19 @@ locals {
     # announcements also require it.
     kubeProxyReplacement = true
 
+    # Without this, Cilium silently falls back to "legacy" host routing
+    # (confirmed via the agent's own log: "BPF host routing requires
+    # enable-bpf-masquerade. Falling back to legacy host routing") instead
+    # of the eBPF path. Under legacy routing, traffic from the *host*
+    # network namespace (not a pod) to a pod IP on another node -- which is
+    # exactly what the API server's aggregation layer does for
+    # metrics-server's APIService -- never leaves the node: no packet on
+    # the vxlan interface, no Cilium drop event, nothing. Pod-to-pod traffic
+    # across nodes is unaffected either way.
+    bpf = {
+      masquerade = true
+    }
+
     # kube-vip's control-plane VIP is what fronts the API server here (the
     # RKE2-world replacement for Talos's KubePrism), reachable independently
     # of the CNI since it's a hostNetwork pod using ARP, not routed
