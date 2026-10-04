@@ -97,3 +97,39 @@ seal-key-backup file="/var/lib/terraform/sealed-secrets-key.yaml":
 # and k8s-apps so secrets can be sealed offline.
 seal-cert:
     kubeseal --controller-namespace kube-system --controller-name sealed-secrets-controller --fetch-cert
+
+# Back up OpenBao's unseal keys + root token (Secret openbao-init, written
+# once by k8s-infra's openbao bootstrap Job on first init) to where only
+# this host can read them, then delete the cluster-side copy -- nothing
+# recreates it once it's gone. Keep a second copy off this host too:
+# losing this file means losing every secret OpenBao holds for this build.
+bao-keys-backup file="/var/lib/terraform/openbao-init.json":
+    umask 077; kubectl -n openbao get secret openbao-init -o jsonpath='{.data.init\.json}' | base64 -d > "{{file}}"
+    kubectl -n openbao delete secret openbao-init
+    echo "Saved to {{file}} -- keep a second copy off this host"
+
+# Seal status of every OpenBao pod. Shamir seal: any pod that restarts
+# (node reboot, upgrade, eviction) comes back sealed on its own.
+bao-status:
+    for p in openbao-0 openbao-1 openbao-2; do \
+      echo "== $p =="; \
+      kubectl -n openbao exec "$p" -- bao status || true; \
+    done
+
+# Unseal every currently-sealed OpenBao pod, using 3 of the 5 key shares
+# from bao-keys-backup's file (point this at your off-host copy if that one
+# was already deleted here).
+bao-unseal file="/var/lib/terraform/openbao-init.json":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    keys=$(jq -r '.keys_base64[0:3][]' "{{file}}")
+    for p in openbao-0 openbao-1 openbao-2; do
+      if [ "$(kubectl -n openbao exec "$p" -- bao status -format=json 2>/dev/null | jq -r .sealed)" = "true" ]; then
+        while IFS= read -r k; do
+          kubectl -n openbao exec "$p" -- bao operator unseal "$k" >/dev/null
+        done <<< "$keys"
+        echo "$p unsealed"
+      else
+        echo "$p already unsealed"
+      fi
+    done
