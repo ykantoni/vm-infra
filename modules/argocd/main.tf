@@ -68,7 +68,7 @@ locals {
       # Two narrow projects for the roots themselves: each may only create
       # Application objects, and only in its own namespace.
       bootstrap-infra = {
-        namespace   = var.namespace
+        namespace = var.namespace
         # No ": " in this string -- the argocd-apps chart renders
         # description unquoted (`description: {{ . }}`), and an embedded
         # colon-space produces invalid YAML ("mapping values are not
@@ -84,7 +84,7 @@ locals {
       }
 
       bootstrap-apps = {
-        namespace   = var.namespace
+        namespace = var.namespace
         # See bootstrap-infra above: no ": " in this string either.
         description = "Root app-of-apps for k8s-apps -- Applications in ${var.apps_namespace} only"
         sourceRepos = [var.k8s_apps_repo_url]
