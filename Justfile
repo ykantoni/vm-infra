@@ -16,18 +16,27 @@ apply:
 # already gone (e.g. this is a re-run after a prior destroy succeeded),
 # there's nothing left for them to guard anyway.
 #  - Longhorn refuses to uninstall without its deleting-confirmation-flag.
-#  - Argo CD Applications carry a resources finalizer; once Argo CD itself is
-#    uninstalled nothing would remove it, and the argocd namespaces would hang
-#    in Terminating. Stripping it first makes deletion non-cascading, which is
-#    fine: the VMs underneath are going away regardless.
+#  - Argo CD Applications/AppProjects carry a resources finalizer. Stripping
+#    it up front isn't enough on its own: the application-controller is
+#    still alive and running selfHeal at that point, and its next
+#    reconciliation just re-adds the finalizer before terraform gets around
+#    to uninstalling Argo CD itself -- observed in practice as the argocd/
+#    argocd-apps namespaces hanging in Terminating forever, well past
+#    terraform destroy's own timeout, even though this loop ran. Scaling
+#    the controller to 0 first and waiting for it to actually stop removes
+#    anything that could re-add the finalizer before the strip runs.
 destroy:
     if kubectl cluster-info --request-timeout=5s >/dev/null 2>&1; then \
       kubectl -n longhorn-system patch settings.longhorn.io deleting-confirmation-flag \
         --type=merge -p '{"value":"true"}' || true; \
-      for app in $(kubectl get applications.argoproj.io -A \
-          -o jsonpath='{range .items[*]}{.metadata.namespace}/{.metadata.name}{"\n"}{end}' 2>/dev/null); do \
-        kubectl -n "${app%%/*}" patch application "${app#*/}" \
-          --type=merge -p '{"metadata":{"finalizers":null}}'; \
+      kubectl scale statefulset,deployment argocd-application-controller -n argocd --replicas=0 2>/dev/null || true; \
+      kubectl wait --for=delete pod -l app.kubernetes.io/name=argocd-application-controller -n argocd --timeout=60s 2>/dev/null || true; \
+      for kind in applications appprojects; do \
+        for res in $(kubectl get "$kind.argoproj.io" -A \
+            -o jsonpath='{range .items[*]}{.metadata.namespace}/{.metadata.name}{"\n"}{end}' 2>/dev/null); do \
+          kubectl -n "${res%%/*}" patch "$kind" "${res#*/}" \
+            --type=merge -p '{"metadata":{"finalizers":null}}'; \
+        done; \
       done; \
     fi
     terraform destroy -auto-approve
