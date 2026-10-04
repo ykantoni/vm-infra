@@ -119,6 +119,12 @@ variable "wait_for_api" {
   default     = true
 }
 
+variable "is_destroy" {
+  description = "Set by the Justfile's destroy recipe (-var is_destroy=true). See providers.tf: on a normal apply, the kubernetes/helm providers must be configured from module.rke2_cluster.kubeconfig first (so a freshly replaced control-plane's new kubeconfig takes effect within that same apply); on a destroy, that module's outputs come back as an unknown value rather than null (every one of them -- not just the ones backed by a data source), and a value-derived check like `!= null` against an unknown is itself unknown, so it can't be used to pick a fallback. This flag swaps the priority to the on-disk kubeconfig instead, which has no such problem since it never references the module at all."
+  type        = bool
+  default     = false
+}
+
 variable "argocd_chart_version" {
   description = "argo-cd Helm chart version; see modules/argocd"
   type        = string

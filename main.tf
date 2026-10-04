@@ -35,13 +35,14 @@ module "rke2_cluster" {
   source = "./modules/rke2-cluster"
 
   controlplane_vip    = var.controlplane_vip
+  cluster_name        = var.cluster_name
   bootstrap_ip        = module.rke2_config.bootstrap_ip
   ssh_admin_user      = module.rke2_config.ssh_admin_user
   ssh_private_key_pem = module.rke2_config.ssh_private_key_pem
   wait_for_api        = var.wait_for_api
   api_wait_timeout    = var.api_wait_timeout
   api_wait_interval   = var.api_wait_interval
-  kubeconfig_raw_path = pathexpand("~/.kube/rke2-raw.yaml")
+  kubeconfig_raw_path = local.kubeconfig_raw_path
 
   nodes = module.proxmox_vm.nodes
 }

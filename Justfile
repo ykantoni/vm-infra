@@ -25,10 +25,22 @@ apply:
 #    terraform destroy's own timeout, even though this loop ran. Scaling
 #    the controller to 0 first and waiting for it to actually stop removes
 #    anything that could re-add the finalizer before the strip runs.
+#  - Any unhealthy aggregated APIService (observed with metrics-server's,
+#    once its pod stopped during teardown) blocks the namespace
+#    controller's discovery step for the *entire* cluster, which in turn
+#    blocks every namespace deletion -- even one with nothing left in it --
+#    with no indication beyond a generic "context deadline exceeded" from
+#    terraform. Deleting any that aren't Available up front avoids that;
+#    Kubernetes just re-registers a legitimate one if its backing pod comes
+#    back, which none will here since the whole cluster is coming down.
 destroy:
     if kubectl cluster-info --request-timeout=5s >/dev/null 2>&1; then \
       kubectl -n longhorn-system patch settings.longhorn.io deleting-confirmation-flag \
         --type=merge -p '{"value":"true"}' || true; \
+      for svc in $(kubectl get apiservices.apiregistration.k8s.io \
+          -o jsonpath='{range .items[?(@.status.conditions[0].status!="True")]}{.metadata.name}{"\n"}{end}' 2>/dev/null); do \
+        kubectl delete apiservice "$svc" || true; \
+      done; \
       kubectl scale statefulset,deployment argocd-application-controller -n argocd --replicas=0 2>/dev/null || true; \
       kubectl wait --for=delete pod -l app.kubernetes.io/name=argocd-application-controller -n argocd --timeout=60s 2>/dev/null || true; \
       for kind in applications appprojects; do \
@@ -39,7 +51,7 @@ destroy:
         done; \
       done; \
     fi
-    terraform destroy -auto-approve
+    terraform destroy -auto-approve -var is_destroy=true
 
 # Format all Terraform files in place.
 fmt:
