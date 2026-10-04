@@ -27,26 +27,38 @@ locals {
 
   kubeconfig_from_module = try(yamldecode(module.rke2_cluster.kubeconfig), null)
 
-  # On `terraform destroy`, module.rke2_cluster.kubeconfig comes back null
-  # -- and so, it turns out, does every other module.rke2_cluster.* output,
-  # even a plain pass-through local with no data source or resource
-  # reference at all (confirmed empirically: adding
-  # module.rke2_cluster.kubeconfig_raw_path and reading *that* path still
-  # produced the same null here). Whatever the exact mechanism, referencing
-  # ANY output of a module that's itself being destroyed in this run isn't
-  # safe for provider configuration -- a provider block can't tolerate an
-  # unknown/deferred value, so it silently fell back to its http://localhost
-  # default instead of erroring, and every kubernetes/helm resource then
-  # failed to delete with "connection refused" rather than a clear error.
+  # On `terraform destroy`, module.rke2_cluster.kubeconfig -- and every
+  # other module.rke2_cluster.* output, even a plain pass-through local
+  # with no data source or resource behind it -- comes back as an UNKNOWN
+  # value, not a concrete null. Confirmed empirically across three attempts:
+  # removing triggers_replace from upstream resources didn't help, and
+  # neither did adding a second module output and reading it; both still
+  # produced the same http://localhost fallback. A value-derived check like
+  # `local.kubeconfig_from_module != null` can't tell unknown apart from a
+  # real value at plan time -- comparing an unknown against anything is
+  # itself unknown, so the ternary that used to pick a fallback here was
+  # itself unknown, and Terraform silently resolved the unknown provider
+  # argument to empty/http://localhost rather than erroring.
   #
-  # The raw kubeconfig file itself isn't managed by Terraform at all
+  # The raw kubeconfig file on disk isn't managed by Terraform at all
   # (written by a local-exec provisioner inside the module, never cleaned
-  # up by any destroy), so it's still on disk throughout a destroy --
-  # reading it via the root-level local above, with no module reference at
-  # all, recovers a real value.
+  # up by any destroy), so it's still there throughout a destroy. Reading it
+  # via the root-level local above has zero reference to module.rke2_cluster,
+  # so it can't inherit that module's unknown-during-destroy behavior.
   kubeconfig_from_disk = try(yamldecode(file(local.kubeconfig_raw_path)), null)
 
-  kubeconfig   = local.kubeconfig_from_module != null ? local.kubeconfig_from_module : local.kubeconfig_from_disk
+  # var.is_destroy (set by the Justfile's destroy recipe) is a plain input
+  # variable, always concretely known -- unlike a value-derived condition,
+  # it's safe to branch on here. Destroy always prefers disk, bypassing the
+  # module entirely so it can't inherit its unknown-during-destroy values.
+  # Every other operation prefers the module (so a control-plane replace's
+  # new kubeconfig takes effect within that same apply), falling back to
+  # disk only if the module's value is a genuine, concrete null -- safe in
+  # this branch since that unknown-during-destroy behavior doesn't apply
+  # outside of destroy.
+  kubeconfig = var.is_destroy ? local.kubeconfig_from_disk : (
+    local.kubeconfig_from_module != null ? local.kubeconfig_from_module : local.kubeconfig_from_disk
+  )
   kube_cluster = try(local.kubeconfig.clusters[0].cluster, null)
   kube_user    = try(local.kubeconfig.users[0].user, null)
 

@@ -39,7 +39,7 @@ destroy:
         done; \
       done; \
     fi
-    terraform destroy -auto-approve
+    terraform destroy -auto-approve -var is_destroy=true
 
 # Format all Terraform files in place.
 fmt:
