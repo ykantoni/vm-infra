@@ -4,7 +4,7 @@ on:
   pull_request:
   push:
     branches:
-      - main
+      - devops
   workflow_dispatch:
 
 # One Terraform run at a time against the runner's local state.
@@ -14,11 +14,15 @@ concurrency:
 
 permissions:
   contents: read
+  pull-requests: write
 
 env:
   PROXMOX_VE_ENDPOINT: ${{ secrets.PROXMOX_VE_ENDPOINT }}
   PROXMOX_VE_API_TOKEN: ${{ secrets.PROXMOX_VE_API_TOKEN }}
   TF_IN_AUTOMATION: "true"
+  TF_WORKING_DIR: .
+  BASE_BRANCH: main
+  HEAD_BRANCH: devops
 
 jobs:
   plan:
@@ -57,7 +61,65 @@ jobs:
         run: terraform validate
 
       - name: Terraform Plan
-        run: terraform plan -input=false -lock-timeout=5m
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: |
+          set -euo pipefail
+
+          terraform plan \
+            -input=false \
+            -no-color \
+            -out=tfplan \
+            -lock-timeout=5m
+
+          terraform show -no-color tfplan > terraform-plan.txt
+
+      - name: Build PR body
+        run: |
+          set -euo pipefail
+
+          cat > pr-body.md <<'EOF'
+          ## Terraform plan
+
+          This pull request was automatically created from the `devops` branch.
+
+          <details>
+          <summary>Show Terraform plan</summary>
+
+          ```terraform
+          EOF
+
+          cat "${TF_WORKING_DIR}/terraform-plan.txt" >> pr-body.md
+
+          cat >> pr-body.md <<'EOF'
+          ```
+
+          </details>
+          EOF
+
+      - name: Create or update PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          PR_NUMBER="$(gh pr list \
+            --base "$BASE_BRANCH" \
+            --head "$HEAD_BRANCH" \
+            --state open \
+            --json number \
+            --jq '.[0].number')"
+
+          if [ -z "$PR_NUMBER" ]; then
+            gh pr create \
+              --base "$BASE_BRANCH" \
+              --head "$HEAD_BRANCH" \
+              --title "Terraform plan: devops → main" \
+              --body-file pr-body.md
+          else
+            gh pr edit "$PR_NUMBER" \
+              --title "Terraform plan: devops → main" \
+              --body-file pr-body.md
+          fi                    
 
   # Plans again and applies in the same job, instead of handing a saved plan
   # to a second job through an artifact: a plan file embeds sensitive values
