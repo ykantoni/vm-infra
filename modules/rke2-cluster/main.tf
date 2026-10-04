@@ -40,6 +40,16 @@ resource "local_sensitive_file" "ssh_key" {
 resource "terraform_data" "wait_for_rke2_server" {
   count = var.wait_for_api ? 1 : 0
 
+  # Forces this to run on every apply, not just on creation -- otherwise,
+  # once this resource exists in state, Terraform considers it permanently
+  # satisfied and never reruns its provisioner again, even after a later
+  # apply destroys and recreates the bootstrap node itself (e.g. a
+  # cluster-cidr/service-cidr change forces cp1 to be replaced). Without
+  # this, downstream dependents (module.cilium, module.argocd) would see an
+  # "unchanged" rke2_cluster module and proceed immediately, racing the new
+  # VM's own RKE2/kube-vip startup.
+  triggers_replace = [timestamp()]
+
   depends_on = [
     local_sensitive_file.ssh_key,
   ]
@@ -69,6 +79,9 @@ resource "terraform_data" "wait_for_rke2_server" {
 # instead of the talos provider's API.
 resource "terraform_data" "fetch_kubeconfig" {
   count = var.wait_for_api ? 1 : 0
+
+  # See wait_for_rke2_server above: always rerun, not just on creation.
+  triggers_replace = [timestamp()]
 
   depends_on = [
     terraform_data.wait_for_rke2_server,
@@ -100,6 +113,9 @@ resource "terraform_data" "fetch_kubeconfig" {
 # gone by the time anyone checks manually a few seconds later.
 resource "terraform_data" "wait_for_vip" {
   count = var.wait_for_api ? 1 : 0
+
+  # See wait_for_rke2_server above: always rerun, not just on creation.
+  triggers_replace = [timestamp()]
 
   depends_on = [
     terraform_data.fetch_kubeconfig,
