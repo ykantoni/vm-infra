@@ -18,6 +18,18 @@ variable "cni" {
   }
 }
 
+variable "cluster_cidr" {
+  description = "Pod network CIDR, written into the control-plane's RKE2 config.yaml as cluster-cidr. Cilium's ipam.mode = \"kubernetes\" (module.cilium) delegates pod IP allocation to whatever podCIDR kube-controller-manager hands out per node from this range, so it has no CIDR of its own to keep in sync."
+  type        = string
+  default     = "1.1.0.0/16"
+}
+
+variable "service_cidr" {
+  description = "ClusterIP service CIDR, written into the control-plane's RKE2 config.yaml as service-cidr. Must not overlap cluster_cidr or any node/VIP address on the LAN."
+  type        = string
+  default     = "2.2.0.0/16"
+}
+
 variable "controlplane_vip" {
   description = "Floating IP kube-vip advertises for the API server (ARP mode), written into the control-plane node's kube-vip manifest and every node's RKE2 tls-san / cluster-facing config."
   type        = string

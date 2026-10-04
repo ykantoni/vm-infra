@@ -28,6 +28,8 @@ write_files:
 %{ if external_ip != null ~}
         - ${external_ip}
 %{ endif ~}
+      cluster-cidr: ${cluster_cidr}
+      service-cidr: ${service_cidr}
 %{ if cni == "cilium" ~}
       cni: none
       disable-kube-proxy: true
@@ -160,7 +162,7 @@ write_files:
               - { name: vip_leaderelection, value: "true" }
               - { name: svc_enable, value: "false" }
               # kube-vip's in-cluster client defaults to the API's ClusterIP
-              # (10.43.x.x), which is unroutable with cni: none and
+              # (2.2.x.x), which is unroutable with cni: none and
               # disable-kube-proxy: true -- nothing can route to a Service IP
               # until Cilium is up, but Cilium's own install needs the VIP
               # this pod provides, a deadlock otherwise. hostNetwork: true

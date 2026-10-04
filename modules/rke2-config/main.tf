@@ -45,6 +45,8 @@ resource "proxmox_virtual_environment_file" "cloudinit" {
       bootstrap_ip     = local.bootstrap_node.ip
       controlplane_vip = var.controlplane_vip
       external_ip      = var.external_ip
+      cluster_cidr     = var.cluster_cidr
+      service_cidr     = var.service_cidr
     })
   }
 }

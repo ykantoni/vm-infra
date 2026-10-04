@@ -9,8 +9,11 @@ controlplane_vip = "192.168.1.99"
 cni            = "cilium"
 cilium_version = "1.19.6"
 
+cluster_cidr = "1.1.0.0/16"
+service_cidr = "2.2.0.0/16"
+
 # Longhorn, Prometheus, metrics-server, the GPU operator and the
-# LoadBalancer address pool (192.168.1.60-98) are configured in k8s-infra.
+# LoadBalancer address pool (192.168.1.60-80) are configured in k8s-infra.
 
 gateway = "192.168.1.1"
 

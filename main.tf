@@ -8,6 +8,8 @@ module "rke2_config" {
   controlplane_vip     = var.controlplane_vip
   external_ip          = var.external_ip
   ssh_admin_user       = var.ssh_admin_user
+  cluster_cidr         = var.cluster_cidr
+  service_cidr         = var.service_cidr
 
   nodes = var.nodes
 }

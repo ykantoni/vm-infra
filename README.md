@@ -127,7 +127,9 @@ any DHCP scope, clear of the node addresses and of `controlplane_vip`.
 | ------------------------ | --------------------------------------- |
 | Nodes                    | 192.168.1.201-192.168.1.204             |
 | Control-plane VIP        | 192.168.1.99                            |
-| LoadBalancer pool        | 192.168.1.60-192.168.1.98 (k8s-infra)   |
+| Pod network CIDR         | 1.1.0.0/16                              |
+| Service CIDR             | 2.2.0.0/16                              |
+| LoadBalancer pool        | 192.168.1.60-192.168.1.80 (k8s-infra)   |
 
 The control-plane VIP is advertised by **kube-vip**, run as an RKE2
 auto-deployed manifest (`/var/lib/rancher/rke2/server/manifests/kube-vip.yaml`,

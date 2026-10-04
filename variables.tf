@@ -83,6 +83,18 @@ variable "cni" {
   }
 }
 
+variable "cluster_cidr" {
+  description = "Pod network CIDR, passed to modules/rke2-config and written into the control-plane's RKE2 config.yaml as cluster-cidr. Cilium's ipam.mode = \"kubernetes\" (module.cilium) hands out pod IPs per node from whatever RKE2 allocates here, so no other module needs this value."
+  type        = string
+  default     = "1.1.0.0/16"
+}
+
+variable "service_cidr" {
+  description = "ClusterIP service CIDR, passed to modules/rke2-config and written into the control-plane's RKE2 config.yaml as service-cidr. Must stay clear of cluster_cidr and of every node/VIP address on the LAN (192.168.1.0/24 here)."
+  type        = string
+  default     = "2.2.0.0/16"
+}
+
 variable "cilium_version" {
   description = "Cilium Helm chart version"
   type        = string
