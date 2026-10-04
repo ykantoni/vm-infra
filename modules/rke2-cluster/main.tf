@@ -76,7 +76,10 @@ resource "terraform_data" "wait_for_rke2_server" {
 # embedded "server: https://127.0.0.1:6443" to the VIP, so the file this
 # module hands back is immediately usable by clients outside that one node
 # -- the same role talos_cluster_kubeconfig plays today, just over SSH
-# instead of the talos provider's API.
+# instead of the talos provider's API. Also renames the cluster/context/user
+# RKE2 hardcodes to "default" to var.cluster_name, so kubectl config
+# current-context shows something more meaningful once merged with any
+# other cluster's kubeconfig.
 resource "terraform_data" "fetch_kubeconfig" {
   count = var.wait_for_api ? 1 : 0
 
@@ -95,6 +98,7 @@ resource "terraform_data" "fetch_kubeconfig" {
         "${var.ssh_admin_user}@${var.bootstrap_ip}" \
         "sudo cat /etc/rancher/rke2/rke2.yaml" \
         | sed "s#https://127.0.0.1:6443#https://${var.controlplane_vip}:6443#" \
+        | sed "s/\bdefault\b/${var.cluster_name}/g" \
         > "${local.kubeconfig_raw_path}"
       chmod 600 "${local.kubeconfig_raw_path}"
     EOT

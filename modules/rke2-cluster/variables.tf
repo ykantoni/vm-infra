@@ -2,6 +2,11 @@ variable "controlplane_vip" {
   type = string
 }
 
+variable "cluster_name" {
+  description = "RKE2's own generated kubeconfig hardcodes the cluster/context/user name to \"default\" -- fetch_kubeconfig rewrites every occurrence to this instead, so kubectl config current-context (and anyone merging this kubeconfig with others) shows something more meaningful than \"default\"."
+  type        = string
+}
+
 variable "bootstrap_ip" {
   description = "IP of the node to SSH into for readiness polling and kubeconfig retrieval (module.rke2_config.bootstrap_ip)"
   type        = string
