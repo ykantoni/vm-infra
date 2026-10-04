@@ -2,9 +2,10 @@ name: Terraform
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, closed]
   push:
     branches:
-      - main
+      - devops
   workflow_dispatch:
 
 # One Terraform run at a time against the runner's local state.
@@ -14,17 +15,28 @@ concurrency:
 
 permissions:
   contents: read
+  pull-requests: write
 
 env:
   PROXMOX_VE_ENDPOINT: ${{ secrets.PROXMOX_VE_ENDPOINT }}
   PROXMOX_VE_API_TOKEN: ${{ secrets.PROXMOX_VE_API_TOKEN }}
   TF_IN_AUTOMATION: "true"
+  TF_WORKING_DIR: .
+  BASE_BRANCH: main
+  HEAD_BRANCH: devops
 
 jobs:
   plan:
     # Never run code from a fork on the self-hosted runner: it sits on the
-    # Proxmox host's network with its credentials.
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    # Proxmox host's network with its credentials. Also skip PR-closed
+    # events entirely -- that's what triggers `apply` below, and there's
+    # nothing to plan or to update a PR body for once it's closed/merged
+    # (gh pr edit on a closed PR, or gh pr create with nothing left to
+    # diff between devops and main right after they were just made equal,
+    # would just error).
+    if: |
+      github.event_name != 'pull_request' ||
+      (github.event.action != 'closed' && github.event.pull_request.head.repo.full_name == github.repository)
 
     runs-on:
       - self-hosted
@@ -57,15 +69,80 @@ jobs:
         run: terraform validate
 
       - name: Terraform Plan
-        run: terraform plan -input=false -lock-timeout=5m
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: |
+          set -euo pipefail
+
+          terraform plan \
+            -input=false \
+            -no-color \
+            -out=tfplan \
+            -lock-timeout=5m
+
+          terraform show -no-color tfplan > terraform-plan.txt
+
+      - name: Build PR body
+        run: |
+          set -euo pipefail
+
+          cat > pr-body.md <<'EOF'
+          ## Terraform plan
+
+          This pull request was automatically created from the `devops` branch.
+
+          <details>
+          <summary>Show Terraform plan</summary>
+
+          ```terraform
+          EOF
+
+          cat "${TF_WORKING_DIR}/terraform-plan.txt" >> pr-body.md
+
+          cat >> pr-body.md <<'EOF'
+          ```
+
+          </details>
+          EOF
+
+      - name: Create or update PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          PR_NUMBER="$(gh pr list \
+            --base "$BASE_BRANCH" \
+            --head "$HEAD_BRANCH" \
+            --state open \
+            --json number \
+            --jq '.[0].number')"
+
+          if [ -z "$PR_NUMBER" ]; then
+            gh pr create \
+              --base "$BASE_BRANCH" \
+              --head "$HEAD_BRANCH" \
+              --title "Terraform plan: devops → main" \
+              --body-file pr-body.md
+          else
+            gh pr edit "$PR_NUMBER" \
+              --title "Terraform plan: devops → main" \
+              --body-file pr-body.md
+          fi                    
 
   # Plans again and applies in the same job, instead of handing a saved plan
   # to a second job through an artifact: a plan file embeds sensitive values
   # (kubeconfig, SSH key), and artifacts of a public repository are public.
   # Review the plan job's output before approving the "proxmox" environment.
+  #
+  # Triggered by the PR actually merging, not by a plain push to main --
+  # github.event.pull_request.merged is GitHub's own documented way to tell
+  # the two apart, and covers every merge strategy (merge commit, squash,
+  # rebase), unlike sniffing the push event or commit message. No `needs:
+  # plan` here: plan deliberately skips on this exact event (see its `if:`
+  # above), and a dependent job is skipped by default when its `needs` job
+  # was skipped -- keeping it would silently stop apply from ever running.
   apply:
-    needs: plan
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'pull_request' && github.event.action == 'closed' && github.event.pull_request.merged == true && github.event.pull_request.base.ref == 'main'
 
     environment: proxmox
 
