@@ -2,6 +2,7 @@ name: Terraform
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, closed]
   push:
     branches:
       - devops
@@ -27,8 +28,15 @@ env:
 jobs:
   plan:
     # Never run code from a fork on the self-hosted runner: it sits on the
-    # Proxmox host's network with its credentials.
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    # Proxmox host's network with its credentials. Also skip PR-closed
+    # events entirely -- that's what triggers `apply` below, and there's
+    # nothing to plan or to update a PR body for once it's closed/merged
+    # (gh pr edit on a closed PR, or gh pr create with nothing left to
+    # diff between devops and main right after they were just made equal,
+    # would just error).
+    if: |
+      github.event_name != 'pull_request' ||
+      (github.event.action != 'closed' && github.event.pull_request.head.repo.full_name == github.repository)
 
     runs-on:
       - self-hosted
@@ -125,9 +133,16 @@ jobs:
   # to a second job through an artifact: a plan file embeds sensitive values
   # (kubeconfig, SSH key), and artifacts of a public repository are public.
   # Review the plan job's output before approving the "proxmox" environment.
+  #
+  # Triggered by the PR actually merging, not by a plain push to main --
+  # github.event.pull_request.merged is GitHub's own documented way to tell
+  # the two apart, and covers every merge strategy (merge commit, squash,
+  # rebase), unlike sniffing the push event or commit message. No `needs:
+  # plan` here: plan deliberately skips on this exact event (see its `if:`
+  # above), and a dependent job is skipped by default when its `needs` job
+  # was skipped -- keeping it would silently stop apply from ever running.
   apply:
-    needs: plan
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'pull_request' && github.event.action == 'closed' && github.event.pull_request.merged == true && github.event.pull_request.base.ref == 'main'
 
     environment: proxmox
 
