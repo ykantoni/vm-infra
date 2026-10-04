@@ -49,6 +49,19 @@ ufw allow 9345/tcp   comment "RKE2 agent registration"
 ufw allow 10250/tcp  comment "kubelet API"
 ufw allow 2379:2380/tcp comment "etcd (control-plane only, harmless open elsewhere)"
 ufw allow from 192.168.1.0/24 comment "cluster/LAN pod+service traffic (Cilium, Longhorn, kube-vip ARP)"
+# Traffic from a pod to a hostPort/hostNetwork backend on its OWN node
+# (e.g. a pod reaching hubble-peer, or a kube-proxy-replacement ClusterIP
+# that resolves to a hostNetwork pod such as Cilium's own agent) isn't
+# VXLAN-encapsulated -- it never gets NATed to look like it came from
+# 192.168.1.0/24, so the rule above doesn't cover it. Observed as ufw
+# dropping SRC=<pod IP> DST=<node IP> packets outright (hubble-relay stuck
+# in CrashLoopBackOff, "i/o timeout" reaching hubble-peer). Must match
+# var.cluster_cidr/var.service_cidr in terraform.tfvars -- this is baked
+# into the image at build time, so changing either means rebuilding the
+# templates (just t-create) and replacing the VMs, same as any other
+# packer/ change (see README's "How changes are applied").
+ufw allow from 1.1.0.0/16 comment "pod CIDR (cluster_cidr) reaching a hostPort/hostNetwork backend on its own node"
+ufw allow from 2.2.0.0/16 comment "service CIDR (service_cidr), same reason"
 ufw --force enable
 
 # --- unattended-upgrades: security patches only, no auto-reboot ---
