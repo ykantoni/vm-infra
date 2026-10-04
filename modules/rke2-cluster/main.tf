@@ -40,16 +40,16 @@ resource "local_sensitive_file" "ssh_key" {
 resource "terraform_data" "wait_for_rke2_server" {
   count = var.wait_for_api ? 1 : 0
 
-  # Forces this to run on every apply, not just on creation -- otherwise,
-  # once this resource exists in state, Terraform considers it permanently
-  # satisfied and never reruns its provisioner again, even after a later
-  # apply destroys and recreates the bootstrap node itself (e.g. a
-  # cluster-cidr/service-cidr change forces cp1 to be replaced). Without
-  # this, downstream dependents (module.cilium, module.argocd) would see an
-  # "unchanged" rke2_cluster module and proceed immediately, racing the new
-  # VM's own RKE2/kube-vip startup.
-  triggers_replace = [timestamp()]
-
+  # Deliberately no triggers_replace here: this resource's result feeds
+  # data.local_file.kubeconfig below, which in turn configures the
+  # kubernetes/helm providers (providers.tf). A provider configuration
+  # can't tolerate an unknown/deferred value -- and marking this resource
+  # "replace" on every plan, including a `terraform destroy` plan, made
+  # that data source's value unknown during destroy, silently collapsing
+  # the provider config to its default (http://localhost), which then
+  # failed to delete anything in the cluster ("connection refused").
+  # verify_cluster_ready below (which nothing's provider config depends on)
+  # is where "rerun on every apply" actually belongs.
   depends_on = [
     local_sensitive_file.ssh_key,
   ]
@@ -80,9 +80,8 @@ resource "terraform_data" "wait_for_rke2_server" {
 resource "terraform_data" "fetch_kubeconfig" {
   count = var.wait_for_api ? 1 : 0
 
-  # See wait_for_rke2_server above: always rerun, not just on creation.
-  triggers_replace = [timestamp()]
-
+  # See wait_for_rke2_server above: no triggers_replace -- this feeds the
+  # provider configuration too.
   depends_on = [
     terraform_data.wait_for_rke2_server,
   ]
@@ -111,14 +110,64 @@ resource "terraform_data" "fetch_kubeconfig" {
 # without this gate the first of them to run would race kube-vip's own
 # startup: "dial tcp <vip>:6443: connect: no route to host", transient and
 # gone by the time anyone checks manually a few seconds later.
+#
+# See wait_for_rke2_server above: no triggers_replace -- this feeds the
+# provider configuration too, through data.local_file.kubeconfig below.
 resource "terraform_data" "wait_for_vip" {
   count = var.wait_for_api ? 1 : 0
 
-  # See wait_for_rke2_server above: always rerun, not just on creation.
+  depends_on = [
+    terraform_data.fetch_kubeconfig,
+  ]
+
+  provisioner "local-exec" {
+    command = <<-EOT
+      set -eu
+      end=$(( $(date +%s) + ${var.api_wait_timeout} ))
+      until curl -sk --max-time 5 -o /dev/null "https://${var.controlplane_vip}:6443/version"; do
+        if [ "$(date +%s)" -ge "$end" ]; then
+          echo "VIP ${var.controlplane_vip}:6443 was not reachable within ${var.api_wait_timeout}s" >&2
+          exit 1
+        fi
+        sleep ${var.api_wait_interval}
+      done
+    EOT
+  }
+}
+
+data "local_file" "kubeconfig" {
+  count = var.wait_for_api ? 1 : 0
+
+  depends_on = [
+    terraform_data.wait_for_vip,
+  ]
+
+  filename = local.kubeconfig_raw_path
+}
+
+# Everything above this point runs once and is never forced to rerun --
+# it's in the dependency chain that feeds the kubernetes/helm provider
+# configuration in providers.tf, which can't tolerate an unknown/deferred
+# value (see the comment on wait_for_rke2_server). Everything below reruns
+# on every apply (triggers_replace = [timestamp()]) and nothing's provider
+# config depends on it, so that's safe.
+#
+# wait_for_vip only confirms the VIP was reachable the first time this
+# module ran. After a later apply destroys and recreates the bootstrap node
+# (e.g. a cluster-cidr/service-cidr change forcing cp1 to be replaced),
+# that one-time check is stale: module.cilium and module.argocd (both
+# depends_on this whole module) would otherwise see "nothing changed" here
+# and proceed immediately, racing the new VM's own RKE2/kube-vip startup --
+# "dial tcp <vip>:6443: connect: no route to host". Re-running the same
+# check every apply closes that race without perturbing the provider
+# configuration path above.
+resource "terraform_data" "verify_cluster_ready" {
+  count = var.wait_for_api ? 1 : 0
+
   triggers_replace = [timestamp()]
 
   depends_on = [
-    terraform_data.fetch_kubeconfig,
+    data.local_file.kubeconfig,
   ]
 
   provisioner "local-exec" {
@@ -155,7 +204,7 @@ resource "terraform_data" "resync_workers" {
   triggers_replace = [timestamp()]
 
   depends_on = [
-    terraform_data.wait_for_vip,
+    terraform_data.verify_cluster_ready,
   ]
 
   provisioner "local-exec" {
@@ -188,15 +237,4 @@ resource "terraform_data" "resync_workers" {
       %{endfor~}
     EOT
   }
-}
-
-data "local_file" "kubeconfig" {
-  count = var.wait_for_api ? 1 : 0
-
-  depends_on = [
-    terraform_data.wait_for_vip,
-    terraform_data.resync_workers,
-  ]
-
-  filename = local.kubeconfig_raw_path
 }
