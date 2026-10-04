@@ -41,7 +41,7 @@ module "rke2_cluster" {
   wait_for_api        = var.wait_for_api
   api_wait_timeout    = var.api_wait_timeout
   api_wait_interval   = var.api_wait_interval
-  kubeconfig_raw_path = pathexpand("~/.kube/rke2-raw.yaml")
+  kubeconfig_raw_path = local.kubeconfig_raw_path
 
   nodes = module.proxmox_vm.nodes
 }
