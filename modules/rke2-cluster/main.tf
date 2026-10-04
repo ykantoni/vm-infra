@@ -136,11 +136,66 @@ resource "terraform_data" "wait_for_vip" {
   }
 }
 
+# A lone control-plane node is also the only etcd member: replacing it (e.g.
+# a cluster-cidr/service-cidr change forces cp1 to be recreated) produces an
+# entirely new cluster -- fresh CA, fresh token validation -- even though it
+# keeps the same name and IP. Existing workers are untouched by that replace
+# (nothing about their own cloud-init changed), so they keep running
+# rke2-agent against what is, from their point of view, an impostor server:
+# "certificate signed by unknown authority", permanently, since RKE2 pins
+# the server's CA on first join and never re-trusts a different one.
+#
+# Detect that by comparing each worker's pinned CA against the current
+# cluster's (already fetched into kubeconfig_raw_path above) and only reset
+# the ones that actually mismatch -- an unaffected apply (most of them)
+# finds every worker already pinned to the right CA and touches nothing.
+resource "terraform_data" "resync_workers" {
+  count = var.wait_for_api ? 1 : 0
+
+  triggers_replace = [timestamp()]
+
+  depends_on = [
+    terraform_data.wait_for_vip,
+  ]
+
+  provisioner "local-exec" {
+    command = <<-EOT
+      set -eu
+      current_ca="$(grep -m1 'certificate-authority-data' "${local.kubeconfig_raw_path}" | awk '{print $2}')"
+      %{for node in values(local.workers)~}
+      remote_ca="$(ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+          -o ConnectTimeout=5 -i "${local.ssh_key_path}" \
+          "${var.ssh_admin_user}@${node.ip}" \
+          "sudo base64 -w0 /var/lib/rancher/rke2/agent/client-ca.crt 2>/dev/null || true")"
+      if [ "$remote_ca" != "$current_ca" ]; then
+        echo "CA mismatch on ${node.ip} -- resetting rke2-agent to rejoin the current cluster"
+        ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+          -i "${local.ssh_key_path}" \
+          "${var.ssh_admin_user}@${node.ip}" \
+          "sudo systemctl stop rke2-agent && sudo rm -rf /var/lib/rancher/rke2/agent && sudo systemctl start rke2-agent"
+        end=$(( $(date +%s) + ${var.api_wait_timeout} ))
+        until ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+            -o ConnectTimeout=5 -i "${local.ssh_key_path}" \
+            "${var.ssh_admin_user}@${node.ip}" \
+            "systemctl is-active --quiet rke2-agent" >/dev/null 2>&1; do
+          if [ "$(date +%s)" -ge "$end" ]; then
+            echo "rke2-agent on ${node.ip} did not come back active within ${var.api_wait_timeout}s" >&2
+            exit 1
+          fi
+          sleep ${var.api_wait_interval}
+        done
+      fi
+      %{endfor~}
+    EOT
+  }
+}
+
 data "local_file" "kubeconfig" {
   count = var.wait_for_api ? 1 : 0
 
   depends_on = [
     terraform_data.wait_for_vip,
+    terraform_data.resync_workers,
   ]
 
   filename = local.kubeconfig_raw_path
